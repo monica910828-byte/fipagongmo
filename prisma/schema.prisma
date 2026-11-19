@@ -1,0 +1,74 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Post {
+  id                String   @id @default(cuid())
+  boardType         String   // PRESS, CARD_NEWS, NOTICE, RECRUIT
+  boardName         String   // 보도자료, 카드뉴스, 공지사항, 공고/공모
+  boardId           String   // i-171, i-170, i-167, i-326
+  nttSn             String   // fipa 고유 게시물 번호 (예: 10126)
+  title             String
+  registeredDate    String   // 예: 2026.11.16
+  views             Int      @default(0)
+  author            String?  @default("한국어촌어항공단")
+  originalUrl       String
+  thumbnailUrl      String?
+  cardImages        String?  // JSON string: string[]
+  attachments       String?  // JSON string: Array<{ name: string, url: string, ext: string, isSupported: boolean, note: string }>
+  rawContent        String
+  summary           String
+  easyExplanation   String   // 고령자 친화형 쉬운 설명
+  voiceScript       String   // TTS 음성안내 대본
+  qnaPairs          String?  // JSON string: Array<{ q: string, a: string }>
+  contentHash       String
+  isSafetyOrPolicy  Boolean  @default(false)
+  policyKeywords    String?  // 감지된 중요 키워드
+  inspectionStatus  String   @default("AUTO_PUBLISHED") // AUTO_PUBLISHED, PENDING_REVIEW, APPROVED, REJECTED, UNPUBLISHED
+  aiModelUsed       String   @default("demo-rule-engine")
+  isDemo            Boolean  @default(true)
+  isExpired         Boolean  @default(false)
+  isDeletedOnSource Boolean  @default(false)
+  lastCheckedAt     DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([boardId, nttSn])
+  @@index([boardType])
+  @@index([inspectionStatus])
+}
+
+model SyncLog {
+  id           Int       @id @default(autoincrement())
+  boardId      String    // i-171, i-170, i-167, i-326, ALL
+  boardName    String?
+  status       String    // SUCCESS, FAILED, RUNNING
+  itemsFound   Int       @default(0)
+  itemsNew     Int       @default(0)
+  itemsUpdated Int       @default(0)
+  itemsFailed  Int       @default(0)
+  errorMessage String?
+  startedAt    DateTime  @default(now())
+  completedAt  DateTime?
+}
+
+model SystemSetting {
+  key         String   @id
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+model QnaInteraction {
+  id        Int      @id @default(autoincrement())
+  postId    String?
+  postTitle String?
+  question  String
+  answer    String
+  createdAt DateTime @default(now())
+}

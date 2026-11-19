@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-scale: 1;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 고령자 친화 접근성 스타일 */
+.font-normal-senior {
+  font-size: 1.125rem; /* 18px */
+  line-height: 1.8;
+}
+
+.font-large-senior {
+  font-size: 1.375rem; /* 22px */
+  line-height: 2.0;
+}
+
+.font-xlarge-senior {
+  font-size: 1.625rem; /* 26px */
+  line-height: 2.2;
+}
+
+/* 고대비 포커스 아웃라인 */
+button:focus-visible, a:focus-visible, input:focus-visible {
+  outline: 4px solid #FFE600;
+  outline-offset: 2px;
+}

@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Next.js & Local DB
+.next
+.env
+*.db
+*.db-journal
