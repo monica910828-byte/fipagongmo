@@ -82,7 +82,7 @@ export default function SeniorHomePage() {
   const [userQuestion, setUserQuestion] = useState('');
   const [isAsking, setIsAsking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [aiAnswer, setAiAnswer] = useState<{ text: string; voiceScript: string; isDemo: boolean } | null>(null);
+  const [aiAnswer, setAiAnswer] = useState<{ text: string; voiceScript: string; isDemo: boolean; diagnostics?: any } | null>(null);
 
   // 브라우저 TTS SpeechSynthesis 관리
   const synthRef = useRef<SpeechSynthesis | null>(null);
@@ -454,9 +454,21 @@ export default function SeniorHomePage() {
     setAiAnswer(null);
 
     try {
+      let idToken = '';
+      if (user) {
+        try {
+          idToken = await user.getIdToken();
+        } catch {}
+      }
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (idToken) {
+        headers['Authorization'] = `Bearer ${idToken}`;
+      }
+
       const res = await fetch('/api/ai/ask', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           question: q,
           postId: activePost?.id || undefined,
@@ -468,13 +480,15 @@ export default function SeniorHomePage() {
           text: data.answer,
           voiceScript: data.voiceScript,
           isDemo: data.isDemo,
+          diagnostics: data.diagnostics,
         });
         playVoice(data.voiceScript);
       } else {
         alert(data.error || '답변을 불러오지 못했습니다.');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('질문 전송 오류:', e);
+      alert('질문 처리 중 통신 오류가 발생했습니다.');
     } finally {
       setIsAsking(false);
     }
@@ -1337,9 +1351,9 @@ export default function SeniorHomePage() {
                   <div className={`p-4 rounded-2xl mt-3 shadow-sm ${highContrast ? 'bg-black border border-yellow-400 text-yellow-300' : 'bg-white border-2 border-emerald-300 text-slate-900'
                     }`}>
                     <div className="flex items-center justify-between mb-2 pb-2 border-b border-emerald-100 font-cute">
-                      <span className="text-emerald-800 text-base flex items-center gap-1.5">
+                      <span className="text-emerald-800 text-base flex items-center gap-1.5 font-bold">
                         <CheckCircle className="w-5 h-5 text-emerald-600" />
-                        어동이의 AI 답변 {!aiAnswer.isDemo ? '(GPT-4o 연동)' : '(기본 안내)'}
+                        어동이의 AI 답변 {!aiAnswer.isDemo ? '(GPT-4o 실시간 연동 ✨)' : '(공단 기본 안내 ℹ️)'}
                       </span>
                       <button
                         onClick={() => playVoice(aiAnswer.voiceScript)}
@@ -1349,6 +1363,13 @@ export default function SeniorHomePage() {
                         <span>답변 다시 듣기</span>
                       </button>
                     </div>
+
+                    {aiAnswer.isDemo && aiAnswer.diagnostics?.message && (
+                      <p className="text-[11px] text-amber-800 bg-amber-50 px-2.5 py-1 rounded-xl mb-2 font-cute border border-amber-200">
+                        💡 {aiAnswer.diagnostics.message}
+                      </p>
+                    )}
+
                     <p className={`${textClass} whitespace-pre-line leading-relaxed font-cute`}>
                       {aiAnswer.text}
                     </p>

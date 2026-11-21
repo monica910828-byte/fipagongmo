@@ -257,9 +257,18 @@ export default function AdminDashboardPage() {
   // 게시물 상태 변경 (승인, 비공개 등)
   async function handleUpdateStatus(postId: string, newStatus: string) {
     try {
+      let idToken = '';
+      if (user) {
+        try {
+          idToken = await user.getIdToken();
+        } catch {}
+      }
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
+
       const res = await fetch(`/api/posts/${postId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ inspectionStatus: newStatus }),
       });
       const data = await res.json();
@@ -270,18 +279,30 @@ export default function AdminDashboardPage() {
         if (inspectingPost?.id === postId) {
           setInspectingPost((prev) => prev ? { ...prev, inspectionStatus: newStatus } : null);
         }
+      } else {
+        alert('상태 변경 실패: ' + (data.error || '권한이 없습니다.'));
       }
     } catch (e: any) {
       alert('상태 변경 실패: ' + e.message);
     }
   }
 
-  // AI 분석 재시도
+  // AI 분석 재시도 (관리자 권한 토큰 전달)
   async function handleReAnalyze(postId: string) {
     setReAnalyzingId(postId);
     try {
+      let idToken = '';
+      if (user) {
+        try {
+          idToken = await user.getIdToken();
+        } catch {}
+      }
+      const headers: Record<string, string> = {};
+      if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
+
       const res = await fetch(`/api/posts/${postId}`, {
         method: 'POST',
+        headers,
       });
       const data = await res.json();
       if (data.success) {

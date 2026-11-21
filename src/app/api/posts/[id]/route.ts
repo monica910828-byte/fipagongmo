@@ -4,8 +4,10 @@ import { transformContentWithOpenAI } from '@/lib/ai-pipeline';
 import { FALLBACK_POSTS } from '@/lib/fallback-posts';
 import { isFirebaseConfigured } from '@/lib/firebase';
 import { getFirestorePostById, updatePostStatusInFirestore } from '@/lib/firestore-service';
+import { verifyFirebaseToken } from '@/lib/server-auth';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 export async function GET(
   req: NextRequest,
@@ -54,6 +56,15 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    // 관리자 인증 검증
+    const authResult = await verifyFirebaseToken(req);
+    if (!authResult.isValid) {
+      return NextResponse.json({
+        success: false,
+        error: `관리자 로그인이 필요한 작업입니다. (${authResult.error})`,
+      }, { status: 401 });
+    }
+
     const body = await req.json();
     const { inspectionStatus, summary, easyExplanation, voiceScript } = body;
 
@@ -92,12 +103,21 @@ export async function PATCH(
   }
 }
 
-// AI 재분석 요청 핸들러
+// AI 재분석 요청 핸들러 (관리자 권한 필수)
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    // 관리자 인증 검증 (비인가 사용자의 OpenAI API 호출 원천 차단)
+    const authResult = await verifyFirebaseToken(req);
+    if (!authResult.isValid) {
+      return NextResponse.json({
+        success: false,
+        error: `관리자 인증이 필요합니다. (${authResult.error})`,
+      }, { status: 401 });
+    }
+
     let post: any = null;
     if (isFirebaseConfigured()) {
       try {

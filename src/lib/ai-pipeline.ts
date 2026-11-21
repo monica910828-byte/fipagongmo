@@ -146,12 +146,24 @@ export async function transformContentWithOpenAI(
   boardType: string,
   cardImagesCount: number = 0
 ): Promise<AiTransformResult> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  const modelName = process.env.OPENAI_MODEL?.trim() || 'gpt-4o';
+  const apiKey = (
+    process.env.OPENAI_API_KEY ||
+    process.env.VITE_OPENAI_API_KEY ||
+    process.env.NEXT_PUBLIC_OPENAI_API_KEY
+  )?.trim();
+  const modelName = (
+    process.env.OPENAI_MODEL ||
+    process.env.VITE_OPENAI_MODEL ||
+    'gpt-4o'
+  ).trim();
 
-  // API 키가 없거나 비어있는 경우 데모 엔진으로 안전하게 폴백
-  if (!apiKey) {
-    return transformContentWithRuleEngine(title, rawText, boardType, cardImagesCount);
+  const isDemo = process.env.DEMO_MODE === 'true';
+
+  // API 키가 없거나 DEMO_MODE=true 인 경우 데모 규칙 엔진으로 안전하게 동작
+  if (!apiKey || isDemo) {
+    const fallback = transformContentWithRuleEngine(title, rawText, boardType, cardImagesCount);
+    fallback.aiModelUsed = isDemo ? 'demo-mode-forced' : 'demo-rule-engine';
+    return fallback;
   }
 
   const openai = new OpenAI({ apiKey });
