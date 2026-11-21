@@ -147,7 +147,7 @@ export async function transformContentWithOpenAI(
   cardImagesCount: number = 0
 ): Promise<AiTransformResult> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
-  const modelName = process.env.OPENAI_MODEL?.trim() || 'gpt-4o-mini';
+  const modelName = process.env.OPENAI_MODEL?.trim() || 'gpt-4o';
 
   // API 키가 없거나 비어있는 경우 데모 엔진으로 안전하게 폴백
   if (!apiKey) {
@@ -188,15 +188,32 @@ ${rawText.slice(0, 4000)}
 </UNTRUSTED_CONTENT>`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: modelName,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.2, // 환각 방지를 위한 낮은 온도
-    });
+    let response;
+    try {
+      response = await openai.chat.completions.create({
+        model: modelName,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.2, // 환각 방지를 위한 낮은 온도
+      });
+    } catch (mErr: any) {
+      if (modelName !== 'gpt-4o') {
+        response = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent },
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.2,
+        });
+      } else {
+        throw mErr;
+      }
+    }
 
     const content = response.choices[0]?.message?.content;
     if (!content) {
