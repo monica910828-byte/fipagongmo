@@ -18,46 +18,70 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.OPENAI_API_KEY?.trim();
     const modelName = process.env.OPENAI_MODEL?.trim() || 'gpt-4o';
 
+    // 1. 모든 게시글 로드 (Prisma -> Firestore -> Fallback)
+    let allPosts: any[] = [];
+    try {
+      allPosts = await prisma.post.findMany({
+        where: { inspectionStatus: { not: 'REJECTED' } },
+      });
+    } catch {}
+
+    if (!allPosts || allPosts.length === 0) {
+      allPosts = [...FALLBACK_POSTS];
+    }
+
     let relevantPost: any = null;
+    let extraContextPosts: any[] = [];
+
     if (postId) {
-      try {
-        relevantPost = await prisma.post.findUnique({ where: { id: postId } });
-      } catch {}
-      if (!relevantPost) {
-        relevantPost = FALLBACK_POSTS.find(p => p.id === postId || p.nttSn === postId) || null;
-      }
-    } else {
-      // 키워드로 관련 게시물 검색
-      const terms = trimmedQuestion.split(' ').filter(t => t.length > 1);
-      if (terms.length > 0) {
-        try {
-          relevantPost = await prisma.post.findFirst({
-            where: {
-              OR: terms.map(term => ({
-                OR: [
-                  { title: { contains: term } },
-                  { summary: { contains: term } },
-                  { easyExplanation: { contains: term } },
-                ],
-              })),
-              inspectionStatus: { in: ['AUTO_PUBLISHED', 'APPROVED'] },
-            },
-            orderBy: { registeredDate: 'desc' },
+      relevantPost = allPosts.find(p => p.id === postId || p.nttSn === postId) || null;
+    }
+
+    if (!relevantPost) {
+      // 키워드 불용어 필터링 후 검색
+      const STOPWORDS = new Set([
+        '대해', '대하여', '관해', '관하여', '관련', '알려줘', '알려주세요', '알려줘요',
+        '무엇인가요', '무엇인가', '어떻게', '어떤', '언제', '인가요', '있나요', '있을까요',
+        '내용', '정보', '소식', '좀', '은', '는', '이', '가', '을', '를', '에', '의', '대한',
+        '알고', '싶어요', '부탁해', '해줘', '있어'
+      ]);
+
+      const words = trimmedQuestion
+        .replace(/[?.,!~^'"‘’“”()[\]]/g, ' ')
+        .split(/\s+/)
+        .map(w => w.trim().replace(/(에서|에게|으로|까지|부터|에|을|를|은|는|이|가|의|로|과|와|도)$/, ''))
+        .filter(w => w.length >= 2 && !STOPWORDS.has(w));
+
+      if (words.length > 0) {
+        // 각 게시물 매칭 스코어 계산 (제목 가중치 10점, 키워드 5점, 요약 3점, 본문 1점)
+        const scored = allPosts.map(post => {
+          let score = 0;
+          const title = (post.title || '').toLowerCase();
+          const summary = (post.summary || '').toLowerCase();
+          const easy = (post.easyExplanation || '').toLowerCase();
+          const raw = (post.rawContent || '').toLowerCase();
+          const kw = (post.policyKeywords || '').toLowerCase();
+
+          words.forEach(word => {
+            const w = word.toLowerCase();
+            if (title.includes(w)) score += 10;
+            if (kw.includes(w)) score += 5;
+            if (easy.includes(w)) score += 3;
+            if (summary.includes(w)) score += 2;
+            if (raw.includes(w)) score += 1;
           });
-        } catch {}
+
+          return { post, score };
+        }).filter(item => item.score > 0).sort((a, b) => b.score - a.score);
+
+        if (scored.length > 0) {
+          relevantPost = scored[0].post;
+          extraContextPosts = scored.slice(1, 3).map(s => s.post);
+        }
       }
 
       if (!relevantPost) {
-        try {
-          relevantPost = await prisma.post.findFirst({
-            where: { inspectionStatus: { in: ['AUTO_PUBLISHED', 'APPROVED'] } },
-            orderBy: { registeredDate: 'desc' },
-          });
-        } catch {}
-      }
-
-      if (!relevantPost) {
-        relevantPost = FALLBACK_POSTS[0] || null;
+        relevantPost = allPosts[0] || FALLBACK_POSTS[0];
       }
     }
 
@@ -69,23 +93,30 @@ export async function POST(req: NextRequest) {
       // 실제 OpenAI 연동 모드
       try {
         const openai = new OpenAI({ apiKey });
-        const systemPrompt = `당신은 한국어촌어항공단(FiPA)의 디지털 취약계층 어르신을 위한 친절한 음성 안내 상담원입니다.
-아래 제공된 [공식 공단 게시물 정보]만을 근거로 정확하게 답변하십시오.
-- 원문에 없는 가상의 사실, 일정, 전화번호는 절대 지어내지 마십시오.
-- 원문에 정보가 없다면 "죄송합니다, 해당 공지 내용에는 안내되어 있지 않습니다. 정확한 사항은 공단 대표전화나 홈페이지를 통해 문의해 주세요."라고 정중히 답하십시오.
-- 어르신들이 듣기 편하도록 부드러운 한국어 경어체(~합니다, ~하세요)로 작성하십시오.
-- 답변은 2~4문장 내외로 간결하게 핵심만 답변하십시오.`;
+        const systemPrompt = `당신은 한국어촌어항공단(FiPA)의 공식 캐릭터이자 어르신과 국민을 위한 친절한 인공지능 마스코트 '어동이'입니다.
+한국어촌어항공단(FiPA)은 어촌 및 어항의 개발과 관리, 어촌관광 활성화, 수산공익직불제 법정의무교육, 귀어귀촌 지원 등을 수행하는 해양수산부 산하 공공기관입니다.
+아래 제공된 [공단 공식 소식 정보]를 근거로 사용자의 질문에 가장 친절하고 정확하게 답변해 주세요.
+- 어르신 등 디지털 취약계층 분들이 듣기 편하도록 부드럽고 다정한 한국어 경어체(~합니다, ~해 드릴게요)로 알기 쉽게 설명해 주세요.
+- 원문에 포함된 신청 기간, 대상, 방법, 문의처가 있다면 핵심만 2~4문장 내외로 명쾌하게 짚어주세요.
+- 원문에 없는 가상의 사실이나 전화번호는 지어내지 마시고, 더 자세한 안내는 공단 대표전화나 홈페이지를 통해 문의하시도록 정중히 덧붙여 주세요.`;
 
-        const userPrompt = `[질문]
+        let contextText = `[주요 공단 소식 정보]
+- 소식 제목: ${relevantPost.title}
+- 소식 구분: ${relevantPost.boardName}
+- 게시일자: ${relevantPost.registeredDate}
+- 공식 소식 전문: ${relevantPost.rawContent || relevantPost.summary}
+- 쉬운 설명: ${relevantPost.easyExplanation}
+- 첨부파일/문의: ${relevantPost.attachments || '공단 홈페이지 문의'}`;
+
+        if (extraContextPosts.length > 0) {
+          contextText += `\n\n[추가 관련 공단 소식]
+` + extraContextPosts.map(p => `- ${p.title} (${p.boardName}): ${p.summary}`).join('\n');
+        }
+
+        const userPrompt = `[질문자 질문]
 ${trimmedQuestion}
 
-[공식 공단 게시물 정보]
-- 제목: ${relevantPost.title}
-- 구분: ${relevantPost.boardName}
-- 게시일: ${relevantPost.registeredDate}
-- 주요내용: ${relevantPost.rawContent || relevantPost.summary}
-- 쉬운설명: ${relevantPost.easyExplanation}
-- 첨부파일/문의: ${relevantPost.attachments || '공단 홈페이지 문의'}`;
+${contextText}`;
 
         let response;
         try {

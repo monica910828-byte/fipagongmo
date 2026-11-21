@@ -6,11 +6,13 @@ import {
   Volume2, VolumeX, Play, Pause, RotateCcw, Search,
   ExternalLink, Mic, MicOff, Send, QrCode,
   CheckCircle, ChevronLeft, ChevronRight, X, AlertCircle, Sparkles,
-  Heart, Waves, Music, MessageCircle, Star, Compass, ShieldCheck
+  Heart, Waves, Music, MessageCircle, Star, Compass, ShieldCheck,
+  Calendar, Headphones, SkipBack, SkipForward
 } from 'lucide-react';
 import Eodongi from '@/components/Eodongi';
 import { useFirebaseAuth } from '@/lib/useFirebaseAuth';
 import AdminLoginModal from '@/components/AdminLoginModal';
+import FormattedFullContent from '@/components/FormattedFullContent';
 
 interface Post {
   id: string;
@@ -26,6 +28,7 @@ interface Post {
   thumbnailUrl?: string | null;
   cardImages?: string | null;
   attachments?: string | null;
+  rawContent?: string;
   summary: string;
   easyExplanation: string;
   voiceScript: string;
@@ -46,6 +49,22 @@ export default function SeniorHomePage() {
   const [loading, setLoading] = useState(true);
   const [selectedBoard, setSelectedBoard] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // 게시 일자별 검색 및 필터 상태
+  const [selectedDate, setSelectedDate] = useState<string>('ALL');
+  const [customDatePicker, setCustomDatePicker] = useState<string>('');
+
+  // 게시 일자별 한번에 음성 듣기 (연속 재생 플레이리스트) 상태
+  const [playlist, setPlaylist] = useState<Post[]>([]);
+  const [playlistIndex, setPlaylistIndex] = useState<number>(0);
+  const [isPlaylistActive, setIsPlaylistActive] = useState<boolean>(false);
+  const [playlistDate, setPlaylistDate] = useState<string>('');
+  const [isPlaylistPaused, setIsPlaylistPaused] = useState<boolean>(false);
+
+  const playlistRef = useRef<Post[]>([]);
+  const playlistIndexRef = useRef<number>(0);
+  const isPlaylistActiveRef = useRef<boolean>(false);
+  const isPlaylistPausedRef = useRef<boolean>(false);
 
   // 고령자 및 누구나 맞춤 글자 크기 / 재생 속도 / 고대비
   const [fontSizeLevel, setFontSizeLevel] = useState<'normal' | 'large' | 'xlarge'>('large');
@@ -127,11 +146,19 @@ export default function SeniorHomePage() {
     }
   }
 
-  // TTS 음성 재생 함수
+  // TTS 음성 재생 함수 (단일)
   function playVoice(textToSpeak: string) {
     if (!synthRef.current) {
       alert('사용하시는 기기에서 브라우저 음성 안내(TTS)를 지원하지 않습니다.');
       return;
+    }
+
+    // 만약 일자별 연속 재생 중이었다면 연속 재생 종료
+    if (isPlaylistActiveRef.current) {
+      setIsPlaylistActive(false);
+      isPlaylistActiveRef.current = false;
+      setIsPlaylistPaused(false);
+      isPlaylistPausedRef.current = false;
     }
 
     synthRef.current.cancel();
@@ -160,6 +187,12 @@ export default function SeniorHomePage() {
       synthRef.current.cancel();
       setIsPlaying(false);
     }
+    if (isPlaylistActiveRef.current) {
+      setIsPlaylistActive(false);
+      isPlaylistActiveRef.current = false;
+      setIsPlaylistPaused(false);
+      isPlaylistPausedRef.current = false;
+    }
   }
 
   function toggleVoice(textToSpeak: string) {
@@ -168,6 +201,162 @@ export default function SeniorHomePage() {
     } else {
       playVoice(textToSpeak);
     }
+  }
+
+  // 게시 일자별 한 번에 음성 듣기 (연속 재생)
+  function startPlaylist(targetDate: string) {
+    if (!synthRef.current) {
+      alert('사용하시는 기기에서 브라우저 음성 안내(TTS)를 지원하지 않습니다.');
+      return;
+    }
+
+    const targetPosts = posts.filter(p => p.registeredDate === targetDate);
+    if (targetPosts.length === 0) {
+      alert(`${targetDate}에 등록된 소식이 없습니다.`);
+      return;
+    }
+
+    synthRef.current.cancel();
+    setPlaylist(targetPosts);
+    playlistRef.current = targetPosts;
+    setPlaylistIndex(0);
+    playlistIndexRef.current = 0;
+    setPlaylistDate(targetDate);
+    setIsPlaylistActive(true);
+    isPlaylistActiveRef.current = true;
+    setIsPlaylistPaused(false);
+    isPlaylistPausedRef.current = false;
+
+    playPlaylistItem(0, targetPosts, targetDate, true);
+  }
+
+  function playPlaylistItem(index: number, items: Post[], dateLabel: string, isFirst = false) {
+    if (!synthRef.current) return;
+    synthRef.current.cancel();
+
+    if (index >= items.length) {
+      // 모든 소식 재생 완료
+      const finishUtterance = new SpeechSynthesisUtterance(
+        `${dateLabel} 등록된 공단 소식 총 ${items.length}건을 모두 들려드렸습니다. 바다와 어촌 소식에 관심 가져주셔서 감사합니다!`
+      );
+      finishUtterance.lang = 'ko-KR';
+      finishUtterance.rate = speechRate;
+      finishUtterance.pitch = 1.1;
+      const voices = synthRef.current.getVoices();
+      const koreanVoice = voices.find(v => v.lang.includes('ko') || v.lang.includes('KO'));
+      if (koreanVoice) finishUtterance.voice = koreanVoice;
+
+      finishUtterance.onend = () => {
+        setIsPlaying(false);
+        setIsPlaylistActive(false);
+        isPlaylistActiveRef.current = false;
+      };
+      synthRef.current.speak(finishUtterance);
+      return;
+    }
+
+    const currentPost = items[index];
+    setPlaylistIndex(index);
+    playlistIndexRef.current = index;
+
+    // 소식 열람 횟수 비동기 집계
+    fetch('/api/analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'READ',
+        postId: currentPost.id,
+        postTitle: currentPost.title,
+        boardName: currentPost.boardName,
+      }),
+    }).catch(() => {});
+
+    let textToSpeak = '';
+    const postBody = currentPost.voiceScript || currentPost.easyExplanation || currentPost.summary;
+    if (isFirst) {
+      textToSpeak = `${dateLabel} 등록 공단 소식 총 ${items.length}건을 차례대로 들려드릴게요. 첫 번째 소식입니다. ${currentPost.title}. ${postBody}`;
+    } else {
+      textToSpeak = `${index + 1}번째 소식입니다. ${currentPost.title}. ${postBody}`;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    utterance.lang = 'ko-KR';
+    utterance.rate = speechRate;
+    utterance.pitch = 1.1;
+
+    const voices = synthRef.current.getVoices();
+    const koreanVoice = voices.find(v => v.lang.includes('ko') || v.lang.includes('KO'));
+    if (koreanVoice) utterance.voice = koreanVoice;
+
+    utterance.onstart = () => {
+      setIsPlaying(true);
+    };
+
+    utterance.onend = () => {
+      if (!isPlaylistActiveRef.current || isPlaylistPausedRef.current) {
+        setIsPlaying(false);
+        return;
+      }
+      setTimeout(() => {
+        if (isPlaylistActiveRef.current && !isPlaylistPausedRef.current) {
+          playPlaylistItem(index + 1, items, dateLabel, false);
+        }
+      }, 900);
+    };
+
+    utterance.onerror = (e) => {
+      console.error('연속 재생 오류:', e);
+      setIsPlaying(false);
+    };
+
+    utteranceRef.current = utterance;
+    synthRef.current.speak(utterance);
+  }
+
+  function skipToNextPost() {
+    const curIdx = playlistIndexRef.current;
+    const items = playlistRef.current;
+    if (curIdx + 1 < items.length) {
+      playPlaylistItem(curIdx + 1, items, playlistDate, false);
+    } else {
+      stopPlaylist();
+    }
+  }
+
+  function skipToPrevPost() {
+    const curIdx = playlistIndexRef.current;
+    const items = playlistRef.current;
+    if (curIdx > 0) {
+      playPlaylistItem(curIdx - 1, items, playlistDate, false);
+    } else {
+      playPlaylistItem(0, items, playlistDate, false);
+    }
+  }
+
+  function togglePlaylistPause() {
+    if (!synthRef.current) return;
+    if (isPlaylistPaused) {
+      synthRef.current.resume();
+      setIsPlaylistPaused(false);
+      isPlaylistPausedRef.current = false;
+      setIsPlaying(true);
+    } else {
+      synthRef.current.pause();
+      setIsPlaylistPaused(true);
+      isPlaylistPausedRef.current = true;
+      setIsPlaying(false);
+    }
+  }
+
+  function stopPlaylist() {
+    if (synthRef.current) {
+      synthRef.current.cancel();
+    }
+    setIsPlaylistActive(false);
+    isPlaylistActiveRef.current = false;
+    setIsPlaylistPaused(false);
+    isPlaylistPausedRef.current = false;
+    setIsPlaying(false);
   }
 
   // 음성 인식 (STT) 시작
@@ -247,13 +436,46 @@ export default function SeniorHomePage() {
     xlarge: 'font-xlarge-senior',
   }[fontSizeLevel];
 
-  // 필터링된 게시물
-  const filteredPosts = posts.filter(post => {
+  // 고유 게시 일자 목록 및 일자별 건수 집계
+  const uniqueDateList = React.useMemo(() => {
+    const dateCounts: Record<string, number> = {};
+    posts.forEach((p) => {
+      if (p.registeredDate) {
+        dateCounts[p.registeredDate] = (dateCounts[p.registeredDate] || 0) + 1;
+      }
+    });
+    return Object.entries(dateCounts)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([date, count]) => ({ date, count }));
+  }, [posts]);
+
+  // 현재 선택된 일자 또는 최신 일자
+  const currentTargetDate = selectedDate !== 'ALL' ? selectedDate : (uniqueDateList[0]?.date || '');
+  const postsForCurrentDate = posts.filter(p => p.registeredDate === currentTargetDate);
+
+  // 필터링된 게시물 (카테고리 + 게시 일자 + 검색어)
+  const filteredPosts = posts.filter((post) => {
     const matchesBoard = selectedBoard === 'ALL' || post.boardType === selectedBoard;
-    const matchesSearch = !searchQuery.trim() ||
-      post.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      post.summary.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesBoard && matchesSearch;
+    const matchesDate = selectedDate === 'ALL' || post.registeredDate === selectedDate;
+    if (!matchesBoard || !matchesDate) return false;
+
+    if (!searchQuery.trim()) return true;
+
+    const query = searchQuery.toLowerCase().trim();
+    const titleMatch = post.title.toLowerCase().includes(query);
+    const summaryMatch = (post.summary || '').toLowerCase().includes(query);
+    const easyMatch = (post.easyExplanation || '').toLowerCase().includes(query);
+    const rawMatch = (post.rawContent || '').toLowerCase().includes(query);
+
+    // 일자 검색 지원 (예: 2026.11.18, 11.18, 11-18, 11월 18일)
+    const postDate = post.registeredDate || '';
+    const dateMatch =
+      postDate.includes(query) ||
+      postDate.replace(/\./g, '-').includes(query) ||
+      postDate.slice(5).includes(query) ||
+      postDate.replace(/\./g, '년 ').replace(/([0-9]{2})$/, '$1일').includes(query);
+
+    return titleMatch || summaryMatch || easyMatch || rawMatch || dateMatch;
   });
 
   return (
@@ -458,12 +680,12 @@ export default function SeniorHomePage() {
         </div>
 
         {/* 5. 귀여운 검색창 (어동이 돋보기 테마) */}
-        <div className="relative mb-5">
+        <div className="relative mb-4">
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="어동이에게 찾고 싶은 소식을 물어보세요! (예: 교육, 공모, 지원금)"
+            placeholder="어동이에게 찾고 싶은 소식을 물어보세요! (예: 교육, 공모, 11.16, 지원금)"
             className={`w-full py-4 pl-12 pr-12 rounded-[28px] text-base md:text-lg font-cute border-4 transition-all ${highContrast
               ? 'bg-zinc-900 border-yellow-400 text-yellow-300 placeholder-yellow-500/60 focus:ring-4 focus:ring-yellow-300'
               : 'bg-white border-sky-200 text-slate-900 placeholder-slate-400 shadow-sm focus:border-sky-400 focus:ring-4 focus:ring-sky-100'
@@ -477,6 +699,152 @@ export default function SeniorHomePage() {
             >
               <X className="w-5 h-5" />
             </button>
+          )}
+        </div>
+
+        {/* 5-1. 📅 게시 일자별 검색 & 모아보기 바 */}
+        <div className={`p-4 md:p-5 rounded-[28px] mb-5 border-3 transition-all ${highContrast ? 'bg-zinc-900 border-yellow-400 text-yellow-300' : 'bg-white border-sky-200/90 shadow-sm'}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2.5 mb-3">
+            <div className="flex items-center gap-2">
+              <div className={`p-1.5 rounded-xl ${highContrast ? 'bg-yellow-400 text-black' : 'bg-sky-100 text-[#0284C7]'}`}>
+                <Calendar className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-cute text-base md:text-lg font-bold flex items-center gap-1.5">
+                  <span>게시 일자별 소식 모아보기</span>
+                  <span className="text-xs font-normal opacity-70">(원하시는 날짜를 콕 눌러보세요)</span>
+                </h3>
+              </div>
+            </div>
+
+            {/* 일자 필터가 켜져 있을 때 선택된 일자 배지 및 초기화 버튼 */}
+            {selectedDate !== 'ALL' && (
+              <div className="flex items-center gap-1.5">
+                <span className={`px-3 py-1 rounded-full font-cute text-xs md:text-sm font-bold flex items-center gap-1 ${
+                  highContrast ? 'bg-yellow-400 text-black' : 'bg-amber-100 text-amber-950 border border-amber-300'
+                }`}>
+                  <span>📅 {selectedDate} 소식 ({filteredPosts.length}건)</span>
+                </span>
+                <button
+                  onClick={() => {
+                    setSelectedDate('ALL');
+                    setCustomDatePicker('');
+                  }}
+                  className="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-cute text-xs transition-colors flex items-center gap-0.5"
+                  title="날짜 필터 해제"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>전체보기</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 일자 빠른 선택 칩 버튼들 + 달력 피커 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => {
+                setSelectedDate('ALL');
+                setCustomDatePicker('');
+              }}
+              className={`px-3.5 py-1.5 rounded-2xl font-cute text-xs md:text-sm transition-all flex items-center gap-1 shadow-2xs ${
+                selectedDate === 'ALL'
+                  ? (highContrast ? 'bg-yellow-400 text-black font-bold ring-2 ring-yellow-200' : 'bg-[#0284C7] text-white font-bold shadow-sm scale-102')
+                  : (highContrast ? 'bg-zinc-800 text-yellow-200 hover:bg-zinc-700' : 'bg-slate-100 text-slate-700 hover:bg-sky-50 border border-slate-200')
+              }`}
+            >
+              <span>전체 일자</span>
+              <span className="opacity-75">({posts.length})</span>
+            </button>
+
+            {uniqueDateList.slice(0, 5).map(({ date, count }) => {
+              const isSelected = selectedDate === date;
+              const monthDay = date.slice(5); // '11.18'
+              return (
+                <button
+                  key={date}
+                  onClick={() => {
+                    setSelectedDate(date);
+                    setCustomDatePicker(date.replace(/\./g, '-'));
+                  }}
+                  className={`px-3.5 py-1.5 rounded-2xl font-cute text-xs md:text-sm transition-all flex items-center gap-1 shadow-2xs ${
+                    isSelected
+                      ? (highContrast ? 'bg-yellow-400 text-black font-bold ring-2 ring-yellow-200' : 'bg-[#0284C7] text-white font-bold shadow-sm scale-102')
+                      : (highContrast ? 'bg-zinc-800 text-yellow-200 hover:bg-zinc-700' : 'bg-sky-50/80 text-sky-900 hover:bg-sky-100 border border-sky-200')
+                  }`}
+                >
+                  <span>📅 {monthDay}</span>
+                  <span className="text-[11px] opacity-75">({count}건)</span>
+                </button>
+              );
+            })}
+
+            {/* 직접 날짜 선택 input */}
+            <div className="flex items-center gap-1.5 ml-auto">
+              <span className="text-xs font-cute text-slate-500 whitespace-nowrap">달력에서 선택:</span>
+              <input
+                type="date"
+                value={customDatePicker}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setCustomDatePicker(val);
+                  if (val) {
+                    setSelectedDate(val.replace(/-/g, '.'));
+                  } else {
+                    setSelectedDate('ALL');
+                  }
+                }}
+                className={`px-2.5 py-1 rounded-xl text-xs font-cute border transition-colors ${
+                  highContrast
+                    ? 'bg-zinc-800 border-yellow-400 text-yellow-200'
+                    : 'bg-white border-sky-200 text-slate-700 shadow-2xs hover:border-sky-400'
+                }`}
+              />
+            </div>
+          </div>
+
+          {/* 5-2. 🎧 게시 일자별 한 번에 음성 듣기 (연속 재생 배너) */}
+          {currentTargetDate && postsForCurrentDate.length > 0 && (
+            <div className={`mt-3.5 pt-3.5 border-t-2 flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 rounded-2xl border ${
+              highContrast
+                ? 'border-yellow-400/60 bg-zinc-800 text-yellow-200'
+                : 'border-emerald-200 bg-gradient-to-r from-emerald-50 via-teal-50 to-sky-50'
+            }`}>
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                <div className={`w-11 h-11 rounded-2xl p-1 shadow-sm flex items-center justify-center border-2 flex-shrink-0 ${
+                  highContrast ? 'bg-black border-yellow-400 text-yellow-300' : 'bg-white border-emerald-300 text-emerald-600'
+                }`}>
+                  <Headphones className="w-6 h-6 animate-bounce" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-cute font-bold text-sm md:text-base">
+                      📅 {currentTargetDate} 소식 한 번에 다 듣기
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-cute font-bold ${
+                      highContrast ? 'bg-yellow-400 text-black' : 'bg-emerald-200 text-emerald-950'
+                    }`}>
+                      총 {postsForCurrentDate.length}건 연속
+                    </span>
+                  </div>
+                  <p className="text-xs opacity-75 font-cute mt-0.5">
+                    어동이가 {currentTargetDate}에 올라온 소식들을 라디오처럼 차례대로 읽어드려요 📻
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => startPlaylist(currentTargetDate)}
+                className={`w-full sm:w-auto px-5 py-2.5 rounded-2xl font-cute text-sm md:text-base font-bold shadow-md hover:shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 ${
+                  highContrast
+                    ? 'bg-yellow-400 text-black hover:bg-yellow-300'
+                    : 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white'
+                }`}
+              >
+                <Volume2 className="w-5 h-5 text-amber-300" />
+                <span>이 날짜 소식 한 번에 듣기</span>
+              </button>
+            </div>
           )}
         </div>
 
@@ -528,9 +896,35 @@ export default function SeniorHomePage() {
                         </span>
                       )}
                     </div>
-                    <span className="text-xs md:text-sm font-cute text-slate-500 bg-sky-50 px-3 py-1 rounded-xl border border-sky-100">
-                      📅 {post.registeredDate}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          setSelectedDate(post.registeredDate);
+                          setCustomDatePicker(post.registeredDate.replace(/\./g, '-'));
+                        }}
+                        className={`text-xs md:text-sm font-cute px-2.5 py-1 rounded-xl border transition-colors flex items-center gap-1 ${
+                          highContrast
+                            ? 'bg-zinc-800 text-yellow-200 border-yellow-400 hover:bg-yellow-400 hover:text-black'
+                            : 'text-slate-600 bg-sky-50 hover:bg-sky-100 border-sky-200'
+                        }`}
+                        title="이 날짜 소식 모아보기"
+                      >
+                        <Calendar className="w-3.5 h-3.5 text-sky-600" />
+                        <span>{post.registeredDate}</span>
+                      </button>
+                      <button
+                        onClick={() => startPlaylist(post.registeredDate)}
+                        className={`text-xs font-cute px-2 py-1 rounded-xl border transition-colors flex items-center gap-1 ${
+                          highContrast
+                            ? 'bg-yellow-400 text-black border-yellow-300 hover:bg-yellow-300'
+                            : 'text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
+                        }`}
+                        title={`${post.registeredDate} 등록 소식 모두 연속 듣기`}
+                      >
+                        <Headphones className="w-3 h-3 text-emerald-600" />
+                        <span>연속듣기</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* 제목 */}
@@ -562,9 +956,9 @@ export default function SeniorHomePage() {
                     </div>
                   )}
 
-                  {/* 쉬운 요약 본문 */}
+                  {/* 쉬운 내용 3줄 이내 요약 */}
                   <p className={`${textClass} line-clamp-3 mb-4 text-slate-700 leading-relaxed font-cute`}>
-                    {post.summary}
+                    {post.easyExplanation || post.summary}
                   </p>
 
                   {/* 하단 큰 버튼 액션 영역 (사탕처럼 톡톡 튀는 젤리 버튼) */}
@@ -600,7 +994,7 @@ export default function SeniorHomePage() {
                         : 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-2 border-amber-300'
                         }`}
                     >
-                      <span>📖 쉬운 설명 보기</span>
+                      <span>📖 자세히 보기</span>
                     </button>
 
                     <a
@@ -740,11 +1134,29 @@ export default function SeniorHomePage() {
                 }`}>
                 <h3 className="font-cute text-lg md:text-xl mb-3 flex items-center gap-2 text-amber-950">
                   <Sparkles className="w-5 h-5 text-amber-500 animate-spin" />
-                  <span>어동이가 알기 쉽게 정리한 소식 📖</span>
+                  <span>어동이가 알기 쉽게 정리한 핵심 소식 📖</span>
                 </h3>
                 <div className={`${textClass} whitespace-pre-line leading-relaxed font-cute text-slate-800`}>
-                  {activePost.easyExplanation}
+                  {activePost.easyExplanation || activePost.summary}
                 </div>
+              </div>
+
+              {/* 공식 소식 전문 (문단별 전체 내용 보기) */}
+              <div className={`p-5 md:p-6 rounded-[28px] ${highContrast ? 'bg-zinc-900 border-2 border-yellow-400' : 'bg-white border-4 border-sky-200 shadow-sm'
+                }`}>
+                <div className="flex items-center justify-between mb-3 pb-2.5 border-b-2 border-sky-100">
+                  <h3 className="font-cute text-lg md:text-xl flex items-center gap-2 text-blue-950">
+                    <span>공식 소식 전문 (문단별 전체 내용) 📜</span>
+                  </h3>
+                  <span className="text-xs font-cute text-sky-800 bg-sky-50 px-2.5 py-1 rounded-xl border border-sky-200">
+                    한국어촌어항공단 공식 원문
+                  </span>
+                </div>
+                <FormattedFullContent
+                  content={activePost.rawContent || activePost.summary || activePost.easyExplanation}
+                  textClass={textClass}
+                  highContrast={highContrast}
+                />
               </div>
 
               {/* 첨부파일 안내 */}
@@ -842,7 +1254,7 @@ export default function SeniorHomePage() {
                     <div className="flex items-center justify-between mb-2 pb-2 border-b border-emerald-100 font-cute">
                       <span className="text-emerald-800 text-base flex items-center gap-1.5">
                         <CheckCircle className="w-5 h-5 text-emerald-600" />
-                        어동이의 답변 {aiAnswer.isDemo && '(데모 상태)'}
+                        어동이의 AI 답변 {!aiAnswer.isDemo ? '(GPT-4o 연동)' : '(기본 안내)'}
                       </span>
                       <button
                         onClick={() => playVoice(aiAnswer.voiceScript)}
@@ -909,6 +1321,79 @@ export default function SeniorHomePage() {
             <p className="text-xs font-cute text-emerald-900 bg-emerald-50 py-2.5 px-3 rounded-2xl border-2 border-emerald-200">
               별도의 앱 설치나 로그인 없이 바로 이용하실 수 있습니다 🐚
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* 11. 🎵 게시 일자별 연속 듣기 플로팅 플레이어 바 */}
+      {isPlaylistActive && playlist.length > 0 && (
+        <div className="fixed bottom-4 left-3 right-3 sm:left-6 sm:right-6 max-w-2xl mx-auto z-50">
+          <div className={`p-4 rounded-[28px] shadow-2xl border-4 flex flex-col sm:flex-row items-center justify-between gap-3.5 transition-all ${
+            highContrast
+              ? 'bg-zinc-950 border-yellow-400 text-yellow-300'
+              : 'bg-gradient-to-r from-sky-900 via-blue-900 to-indigo-950 text-white border-sky-300/80 shadow-sky-950/40'
+          }`}>
+            {/* 재생 중인 소식 정보 */}
+            <div className="flex items-center gap-3 w-full sm:w-auto flex-1 min-w-0">
+              <div className="w-12 h-12 rounded-2xl bg-white/10 p-1 flex items-center justify-center border-2 border-amber-300 flex-shrink-0">
+                <img src="/eodongi_official.png" alt="어동이 재생" className="w-10 h-10 object-contain" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-cute px-2 py-0.5 rounded-full bg-amber-400 text-blue-950 font-bold">
+                    소식 {playlistIndex + 1} / {playlist.length}
+                  </span>
+                  <span className="text-xs text-sky-200 font-cute truncate">
+                    📅 {playlistDate} 연속 재생 중
+                  </span>
+                </div>
+                <p className="text-sm md:text-base font-cute font-bold truncate mt-0.5 text-white">
+                  {playlist[playlistIndex]?.title}
+                </p>
+              </div>
+            </div>
+
+            {/* 플레이어 컨트롤 버튼들 */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* 이전 곡 */}
+              <button
+                onClick={skipToPrevPost}
+                disabled={playlistIndex === 0}
+                className="p-2.5 rounded-2xl bg-white/15 hover:bg-white/25 disabled:opacity-40 text-white transition-all active:scale-95"
+                title="이전 소식 듣기"
+              >
+                <SkipBack className="w-5 h-5" />
+              </button>
+
+              {/* 일시정지 / 재생 */}
+              <button
+                onClick={togglePlaylistPause}
+                className="px-4 py-2.5 rounded-2xl bg-amber-400 hover:bg-amber-300 text-blue-950 font-cute font-bold text-sm md:text-base flex items-center gap-1.5 shadow-md active:scale-95"
+                title={isPlaylistPaused ? '다시 듣기' : '잠시 멈춤'}
+              >
+                {isPlaylistPaused ? <Play className="w-5 h-5 fill-current" /> : <Pause className="w-5 h-5 fill-current" />}
+                <span>{isPlaylistPaused ? '재생' : '멈춤'}</span>
+              </button>
+
+              {/* 다음 곡 */}
+              <button
+                onClick={skipToNextPost}
+                disabled={playlistIndex + 1 >= playlist.length}
+                className="p-2.5 rounded-2xl bg-white/15 hover:bg-white/25 disabled:opacity-40 text-white transition-all active:scale-95"
+                title="다음 소식 듣기"
+              >
+                <SkipForward className="w-5 h-5" />
+              </button>
+
+              {/* 닫기 (재생 종료) */}
+              <button
+                onClick={stopPlaylist}
+                className="p-2.5 rounded-2xl bg-white/10 hover:bg-rose-600 text-white transition-all active:scale-95 ml-1"
+                title="연속 재생 끄기"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
       )}
