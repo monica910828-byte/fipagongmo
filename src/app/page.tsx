@@ -69,6 +69,22 @@ export default function SeniorHomePage() {
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
+  const openPost = (post: Post) => {
+    setActivePost(post);
+    setCurrentCardIndex(0);
+    // 소식 열람 횟수 비동기 집계
+    fetch('/api/analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'READ',
+        postId: post.id,
+        postTitle: post.title,
+        boardName: post.boardName,
+      }),
+    }).catch(() => {});
+  };
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       synthRef.current = window.speechSynthesis;
@@ -519,10 +535,7 @@ export default function SeniorHomePage() {
 
                   {/* 제목 */}
                   <h3
-                    onClick={() => {
-                      setActivePost(post);
-                      setCurrentCardIndex(0);
-                    }}
+                    onClick={() => openPost(post)}
                     className={`font-cute tracking-wide mb-3 cursor-pointer hover:text-[#0284C7] transition-colors leading-snug ${fontSizeLevel === 'normal' ? 'text-xl md:text-2xl' : fontSizeLevel === 'large' ? 'text-2xl md:text-3xl' : 'text-3xl md:text-4xl'
                       }`}
                   >
@@ -532,10 +545,7 @@ export default function SeniorHomePage() {
                   {/* 카드뉴스 미리보기 썸네일 또는 일반 썸네일 */}
                   {post.thumbnailUrl && (
                     <div
-                      onClick={() => {
-                        setActivePost(post);
-                        setCurrentCardIndex(0);
-                      }}
+                      onClick={() => openPost(post)}
                       className="mb-4 rounded-2xl overflow-hidden cursor-pointer max-h-56 bg-slate-100 border-2 border-sky-100 flex items-center justify-center relative group"
                     >
                       <img
@@ -560,7 +570,20 @@ export default function SeniorHomePage() {
                   {/* 하단 큰 버튼 액션 영역 (사탕처럼 톡톡 튀는 젤리 버튼) */}
                   <div className="flex flex-wrap items-center gap-2 pt-3 border-t-2 border-sky-100/60">
                     <button
-                      onClick={() => toggleVoice(post.voiceScript)}
+                      onClick={() => {
+                        toggleVoice(post.voiceScript);
+                        // 음성 청취 시에도 열람 통계 카운트
+                        fetch('/api/analytics', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            type: 'READ',
+                            postId: post.id,
+                            postTitle: post.title,
+                            boardName: post.boardName,
+                          }),
+                        }).catch(() => {});
+                      }}
                       className={`flex-1 min-w-[160px] py-3.5 px-5 rounded-[22px] font-cute text-base md:text-lg flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 ${isPlaying
                         ? 'bg-rose-500 text-white animate-pulse'
                         : (highContrast ? 'bg-yellow-400 text-black hover:bg-yellow-300 ring-2 ring-yellow-200' : 'bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-500 text-white hover:brightness-105 shadow-sky-200')
@@ -571,10 +594,7 @@ export default function SeniorHomePage() {
                     </button>
 
                     <button
-                      onClick={() => {
-                        setActivePost(post);
-                        setCurrentCardIndex(0);
-                      }}
+                      onClick={() => openPost(post)}
                       className={`py-3.5 px-5 rounded-[22px] font-cute text-base md:text-lg flex items-center gap-1.5 transition-all shadow-sm active:scale-95 ${highContrast
                         ? 'bg-zinc-800 text-yellow-300 hover:bg-zinc-700 border-2 border-yellow-400'
                         : 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-2 border-amber-300'

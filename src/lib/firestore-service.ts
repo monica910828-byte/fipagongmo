@@ -12,6 +12,7 @@ import {
   limit,
   writeBatch,
   Timestamp,
+  increment,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, isFirebaseConfigured } from './firebase';
@@ -234,5 +235,121 @@ export async function saveSyncLogToFirestore(log: {
   } catch (error) {
     console.error('Firestore saveSyncLogToFirestore 에러:', error);
     return false;
+  }
+}
+
+const QNA_COLLECTION = 'fipa_qna_interactions';
+const READ_LOGS_COLLECTION = 'fipa_read_logs';
+
+/**
+ * 8. 사용자 질문(QnA) 기록 Firestore 저장
+ */
+export async function saveQnaToFirestore(
+  question: string,
+  answer: string,
+  postId?: string | null,
+  postTitle?: string | null
+): Promise<boolean> {
+  if (!db || !isFirebaseConfigured()) return false;
+
+  try {
+    const qnaRef = collection(db, QNA_COLLECTION);
+    const docRef = doc(qnaRef);
+    await setDoc(docRef, {
+      question,
+      answer,
+      postId: postId || null,
+      postTitle: postTitle || null,
+      createdAt: Timestamp.now(),
+    });
+    return true;
+  } catch (error) {
+    console.error('Firestore saveQnaToFirestore 에러:', error);
+    return false;
+  }
+}
+
+/**
+ * 9. 사용자 질문(QnA) 최근 목록 Firestore 조회
+ */
+export async function getQnaFromFirestore(limitCount: number = 50): Promise<any[]> {
+  if (!db || !isFirebaseConfigured()) return [];
+
+  try {
+    const qnaRef = collection(db, QNA_COLLECTION);
+    const q = query(qnaRef, orderBy('createdAt', 'desc'), limit(limitCount));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => {
+      const data = d.data();
+      return {
+        id: d.id,
+        ...data,
+        createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString(),
+      };
+    });
+  } catch (error) {
+    console.error('Firestore getQnaFromFirestore 에러:', error);
+    return [];
+  }
+}
+
+/**
+ * 10. 사용자 소식 열람/청취(Read) 횟수 Firestore 기록
+ */
+export async function recordPostReadInFirestore(
+  postId: string,
+  postTitle?: string,
+  boardName?: string
+): Promise<boolean> {
+  if (!db || !isFirebaseConfigured()) return false;
+
+  try {
+    // 1) 해당 게시글의 views 1 증가
+    const postDocRef = doc(db, POSTS_COLLECTION, postId);
+    await updateDoc(postDocRef, {
+      views: increment(1),
+      updatedAt: Timestamp.now(),
+    }).catch(async () => {
+      // 문서가 없는 경우 등 무시
+    });
+
+    // 2) 실시간 열람 이벤트 로그 추가
+    const readLogsRef = collection(db, READ_LOGS_COLLECTION);
+    const logDocRef = doc(readLogsRef);
+    await setDoc(logDocRef, {
+      postId,
+      postTitle: postTitle || '',
+      boardName: boardName || '',
+      readAt: Timestamp.now(),
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Firestore recordPostReadInFirestore 에러:', error);
+    return false;
+  }
+}
+
+/**
+ * 11. 사용자 실시간 소식 열람 로그 목록 조회
+ */
+export async function getReadLogsFromFirestore(limitCount: number = 50): Promise<any[]> {
+  if (!db || !isFirebaseConfigured()) return [];
+
+  try {
+    const readLogsRef = collection(db, READ_LOGS_COLLECTION);
+    const q = query(readLogsRef, orderBy('readAt', 'desc'), limit(limitCount));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => {
+      const data = d.data();
+      return {
+        id: d.id,
+        ...data,
+        readAt: data.readAt?.toDate ? data.readAt.toDate().toISOString() : new Date().toISOString(),
+      };
+    });
+  } catch (error) {
+    console.error('Firestore getReadLogsFromFirestore 에러:', error);
+    return [];
   }
 }

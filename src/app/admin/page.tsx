@@ -7,6 +7,7 @@ import {
   Database, Cloud, UploadCloud, Flame, Key, LogOut, Lock, Mail, Loader2, ShieldCheck
 } from 'lucide-react';
 import Eodongi from '@/components/Eodongi';
+import AdminAnalyticsSection from '@/components/AdminAnalyticsSection';
 import { useFirebaseAuth } from '@/lib/useFirebaseAuth';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, isFirebaseConfigured } from '@/lib/firebase';
@@ -501,6 +502,9 @@ export default function AdminDashboardPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
+        {/* 1. 최상단: 사용자들이 읽은 소식 횟수 & 질문 내용 실시간 시각화 그래프 센터 */}
+        <AdminAnalyticsSection />
+
         {/* 기관 승인 및 robots.txt 상태 안내 배너 (요구사항 2, 4) */}
         <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 flex items-start gap-3 shadow-sm">
           <ShieldAlert className="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />

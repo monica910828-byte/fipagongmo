@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import prisma from '@/lib/prisma';
 import { FALLBACK_POSTS } from '@/lib/fallback-posts';
+import { saveQnaToFirestore } from '@/lib/firestore-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -134,7 +135,7 @@ ${trimmedQuestion}
       isDemo = true;
     }
 
-    // 질의응답 이력 로깅 (실패해도 무방)
+    // 질의응답 이력 로깅 (Prisma & Firestore 양방향 안전 저장)
     try {
       await prisma.qnaInteraction.create({
         data: {
@@ -144,6 +145,10 @@ ${trimmedQuestion}
           answer,
         },
       });
+    } catch {}
+
+    try {
+      await saveQnaToFirestore(trimmedQuestion, answer, relevantPost?.id, relevantPost?.title);
     } catch {}
 
     return NextResponse.json({
