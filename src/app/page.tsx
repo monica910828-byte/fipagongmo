@@ -179,6 +179,11 @@ export default function SeniorHomePage() {
     }
   }
 
+  // TTS 발음 교정 (화면 텍스트는 유지하고 음성 읽기 시 FIPA/FiPA/fipa를 '피파'로 자연스럽게 발음)
+  function normalizeTextForTts(text: string): string {
+    return (text || '').replace(/(^|[^A-Za-z])fipa(?![A-Za-z])/gi, '$1피파');
+  }
+
   // TTS 음성 재생 함수 (단일)
   function playVoice(textToSpeak: string) {
     if (!synthRef.current) {
@@ -196,7 +201,7 @@ export default function SeniorHomePage() {
 
     synthRef.current.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    const utterance = new SpeechSynthesisUtterance(normalizeTextForTts(textToSpeak));
     utterance.lang = 'ko-KR';
     utterance.rate = speechRate;
     utterance.pitch = 1.1; // 귀엽고 상냥한 밝은 어조
@@ -270,7 +275,9 @@ export default function SeniorHomePage() {
     if (index >= items.length) {
       // 모든 소식 재생 완료
       const finishUtterance = new SpeechSynthesisUtterance(
-        `${dateLabel} 등록된 공단 소식 총 ${items.length}건을 모두 들려드렸습니다. 바다와 어촌 소식에 관심 가져주셔서 감사합니다!`
+        normalizeTextForTts(
+          `${dateLabel} 등록된 공단 소식 총 ${items.length}건을 모두 들려드렸습니다. 바다와 어촌 소식에 관심 가져주셔서 감사합니다!`
+        )
       );
       finishUtterance.lang = 'ko-KR';
       finishUtterance.rate = speechRate;
@@ -312,7 +319,7 @@ export default function SeniorHomePage() {
       textToSpeak = `${index + 1}번째 소식입니다. ${currentPost.title}. ${postBody}`;
     }
 
-    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    const utterance = new SpeechSynthesisUtterance(normalizeTextForTts(textToSpeak));
     utterance.lang = 'ko-KR';
     utterance.rate = speechRate;
     utterance.pitch = 1.1;
