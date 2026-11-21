@@ -16,11 +16,6 @@ const nextConfig = {
       },
     ],
   },
-  experimental: {
-    outputFileTracingIncludes: {
-      '/api/**/*': ['./prisma/dev.db', './dev.db'],
-    },
-  },
   webpack: (config) => {
     config.resolve.alias = {
       ...(config.resolve.alias || {}),
