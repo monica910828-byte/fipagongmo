@@ -107,6 +107,11 @@ export default function SeniorHomePage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       synthRef.current = window.speechSynthesis;
+      // 사용자가 이전에 선택한 글자 크기 복원
+      const saved = localStorage.getItem('fipa_font_size_level');
+      if (saved === 'normal' || saved === 'large' || saved === 'xlarge') {
+        setFontSizeLevel(saved);
+      }
     }
     loadPosts();
     loadQrCode();
@@ -117,6 +122,23 @@ export default function SeniorHomePage() {
       }
     };
   }, []);
+
+  // 글자 크기 변경 시 <html> 루트 태그에 전역 스케일 적용 (모든 탭/메뉴/텍스트 전역 확대)
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-font-size', fontSizeLevel);
+      if (fontSizeLevel === 'normal') {
+        document.documentElement.style.fontSize = '16px';
+      } else if (fontSizeLevel === 'large') {
+        document.documentElement.style.fontSize = '19px';
+      } else if (fontSizeLevel === 'xlarge') {
+        document.documentElement.style.fontSize = '22.5px';
+      }
+      try {
+        localStorage.setItem('fipa_font_size_level', fontSizeLevel);
+      } catch (_) {}
+    }
+  }, [fontSizeLevel]);
 
   async function loadPosts() {
     setLoading(true);
@@ -732,12 +754,14 @@ export default function SeniorHomePage() {
               <button
                 key={tab.id}
                 onClick={() => setSelectedBoard(tab.id)}
-                className={`px-4 py-2.5 rounded-[22px] font-cute text-base md:text-lg whitespace-nowrap transition-all flex items-center gap-1.5 shadow-sm flex-shrink-0 active:scale-95 ${isSelected
+                className={`rounded-[22px] font-cute whitespace-nowrap transition-all flex items-center gap-1.5 shadow-sm flex-shrink-0 active:scale-95 ${
+                  fontSizeLevel === 'xlarge' ? 'text-lg md:text-xl px-5 py-3' : 'text-base md:text-lg px-4 py-2.5'
+                } ${isSelected
                   ? (highContrast ? 'bg-yellow-400 text-black shadow-md ring-4 ring-yellow-300' : `bg-gradient-to-r ${tab.color} text-white shadow-md scale-105 ring-2 ring-white`)
                   : (highContrast ? 'bg-zinc-800 text-yellow-200 hover:bg-zinc-700' : 'bg-white text-slate-700 hover:bg-sky-50 border-2 border-sky-100 hover:border-sky-300')
                   }`}
               >
-                <span className="text-lg">{tab.emoji}</span>
+                <span className={fontSizeLevel === 'xlarge' ? 'text-xl' : 'text-lg'}>{tab.emoji}</span>
                 <span>{tab.name}</span>
               </button>
             );
@@ -751,7 +775,9 @@ export default function SeniorHomePage() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="어동이에게 찾고 싶은 소식을 물어보세요! (예: 교육, 공모, 11.16, 지원금)"
-            className={`w-full py-4 pl-12 pr-12 rounded-[28px] text-base md:text-lg font-cute border-4 transition-all ${highContrast
+            className={`w-full py-4 pl-12 pr-12 rounded-[28px] font-cute border-4 transition-all ${
+              fontSizeLevel === 'xlarge' ? 'text-lg md:text-xl' : 'text-base md:text-lg'
+            } ${highContrast
               ? 'bg-zinc-900 border-yellow-400 text-yellow-300 placeholder-yellow-500/60 focus:ring-4 focus:ring-yellow-300'
               : 'bg-white border-sky-200 text-slate-900 placeholder-slate-400 shadow-sm focus:border-sky-400 focus:ring-4 focus:ring-sky-100'
               }`}
@@ -772,12 +798,14 @@ export default function SeniorHomePage() {
           <div className="flex flex-wrap items-center justify-between gap-2.5 mb-3">
             <div className="flex items-center gap-2">
               <div className={`p-1.5 rounded-xl ${highContrast ? 'bg-yellow-400 text-black' : 'bg-sky-100 text-[#0284C7]'}`}>
-                <Calendar className="w-5 h-5" />
+                <Calendar className={fontSizeLevel === 'xlarge' ? 'w-6 h-6' : 'w-5 h-5'} />
               </div>
               <div>
-                <h3 className="font-cute text-base md:text-lg font-bold flex items-center gap-1.5">
+                <h3 className={`font-cute font-bold flex items-center gap-1.5 ${
+                  fontSizeLevel === 'xlarge' ? 'text-lg md:text-xl' : 'text-base md:text-lg'
+                }`}>
                   <span>게시 일자별 소식 모아보기</span>
-                  <span className="text-xs font-normal opacity-70">(원하시는 날짜를 콕 눌러보세요)</span>
+                  <span className={`${fontSizeLevel === 'xlarge' ? 'text-sm' : 'text-xs'} font-normal opacity-70`}>(원하시는 날짜를 콕 눌러보세요)</span>
                 </h3>
               </div>
             </div>
@@ -785,7 +813,9 @@ export default function SeniorHomePage() {
             {/* 일자 필터가 켜져 있을 때 선택된 일자 배지 및 초기화 버튼 */}
             {selectedDate !== 'ALL' && (
               <div className="flex items-center gap-1.5">
-                <span className={`px-3 py-1 rounded-full font-cute text-xs md:text-sm font-bold flex items-center gap-1 ${
+                <span className={`px-3 py-1 rounded-full font-cute font-bold flex items-center gap-1 ${
+                  fontSizeLevel === 'xlarge' ? 'text-sm md:text-base' : 'text-xs md:text-sm'
+                } ${
                   highContrast ? 'bg-yellow-400 text-black' : 'bg-amber-100 text-amber-950 border border-amber-300'
                 }`}>
                   <span>📅 {selectedDate} 소식 ({filteredPosts.length}건)</span>
@@ -795,7 +825,9 @@ export default function SeniorHomePage() {
                     setSelectedDate('ALL');
                     setCustomDatePicker('');
                   }}
-                  className="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-cute text-xs transition-colors flex items-center gap-0.5"
+                  className={`px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-cute transition-colors flex items-center gap-0.5 ${
+                    fontSizeLevel === 'xlarge' ? 'text-sm' : 'text-xs'
+                  }`}
                   title="날짜 필터 해제"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -812,7 +844,9 @@ export default function SeniorHomePage() {
                 setSelectedDate('ALL');
                 setCustomDatePicker('');
               }}
-              className={`px-3.5 py-1.5 rounded-2xl font-cute text-xs md:text-sm transition-all flex items-center gap-1 shadow-2xs ${
+              className={`rounded-2xl font-cute transition-all flex items-center gap-1 shadow-2xs ${
+                fontSizeLevel === 'xlarge' ? 'text-sm md:text-base px-4 py-2' : 'text-xs md:text-sm px-3.5 py-1.5'
+              } ${
                 selectedDate === 'ALL'
                   ? (highContrast ? 'bg-yellow-400 text-black font-bold ring-2 ring-yellow-200' : 'bg-[#0284C7] text-white font-bold shadow-sm scale-102')
                   : (highContrast ? 'bg-zinc-800 text-yellow-200 hover:bg-zinc-700' : 'bg-slate-100 text-slate-700 hover:bg-sky-50 border border-slate-200')
@@ -832,21 +866,23 @@ export default function SeniorHomePage() {
                     setSelectedDate(date);
                     setCustomDatePicker(date.replace(/\./g, '-'));
                   }}
-                  className={`px-3.5 py-1.5 rounded-2xl font-cute text-xs md:text-sm transition-all flex items-center gap-1 shadow-2xs ${
+                  className={`rounded-2xl font-cute transition-all flex items-center gap-1 shadow-2xs ${
+                    fontSizeLevel === 'xlarge' ? 'text-sm md:text-base px-4 py-2' : 'text-xs md:text-sm px-3.5 py-1.5'
+                  } ${
                     isSelected
                       ? (highContrast ? 'bg-yellow-400 text-black font-bold ring-2 ring-yellow-200' : 'bg-[#0284C7] text-white font-bold shadow-sm scale-102')
                       : (highContrast ? 'bg-zinc-800 text-yellow-200 hover:bg-zinc-700' : 'bg-sky-50/80 text-sky-900 hover:bg-sky-100 border border-sky-200')
                   }`}
                 >
                   <span>📅 {monthDay}</span>
-                  <span className="text-[11px] opacity-75">({count}건)</span>
+                  <span className={`${fontSizeLevel === 'xlarge' ? 'text-xs' : 'text-[11px]'} opacity-75`}>({count}건)</span>
                 </button>
               );
             })}
 
             {/* 직접 날짜 선택 input */}
             <div className="flex items-center gap-1.5 ml-auto">
-              <span className="text-xs font-cute text-slate-500 whitespace-nowrap">달력에서 선택:</span>
+              <span className={`${fontSizeLevel === 'xlarge' ? 'text-sm' : 'text-xs'} font-cute text-slate-500 whitespace-nowrap`}>달력에서 선택:</span>
               <input
                 type="date"
                 value={customDatePicker}
@@ -859,7 +895,9 @@ export default function SeniorHomePage() {
                     setSelectedDate('ALL');
                   }
                 }}
-                className={`px-2.5 py-1 rounded-xl text-xs font-cute border transition-colors ${
+                className={`rounded-xl font-cute border transition-colors ${
+                  fontSizeLevel === 'xlarge' ? 'text-sm px-3 py-1.5' : 'text-xs px-2.5 py-1'
+                } ${
                   highContrast
                     ? 'bg-zinc-800 border-yellow-400 text-yellow-200'
                     : 'bg-white border-sky-200 text-slate-700 shadow-2xs hover:border-sky-400'
@@ -883,16 +921,20 @@ export default function SeniorHomePage() {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-cute font-bold text-sm md:text-base">
+                    <span className={`font-cute font-bold ${
+                      fontSizeLevel === 'xlarge' ? 'text-base md:text-lg' : 'text-sm md:text-base'
+                    }`}>
                       📅 {currentTargetDate} 소식 한 번에 다 듣기
                     </span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-cute font-bold ${
+                    <span className={`px-2 py-0.5 rounded-full font-cute font-bold ${
+                      fontSizeLevel === 'xlarge' ? 'text-sm' : 'text-xs'
+                    } ${
                       highContrast ? 'bg-yellow-400 text-black' : 'bg-emerald-200 text-emerald-950'
                     }`}>
                       총 {postsForCurrentDate.length}건 연속
                     </span>
                   </div>
-                  <p className="text-xs opacity-75 font-cute mt-0.5">
+                  <p className={`${fontSizeLevel === 'xlarge' ? 'text-sm' : 'text-xs'} opacity-75 font-cute mt-0.5`}>
                     어동이가 {currentTargetDate}에 올라온 소식들을 라디오처럼 차례대로 읽어드려요 📻
                   </p>
                 </div>
@@ -900,7 +942,9 @@ export default function SeniorHomePage() {
 
               <button
                 onClick={() => startPlaylist(currentTargetDate)}
-                className={`w-full sm:w-auto px-5 py-2.5 rounded-2xl font-cute text-sm md:text-base font-bold shadow-md hover:shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 ${
+                className={`w-full sm:w-auto rounded-2xl font-cute font-bold shadow-md hover:shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 ${
+                  fontSizeLevel === 'xlarge' ? 'text-base md:text-lg px-6 py-3' : 'text-sm md:text-base px-5 py-2.5'
+                } ${
                   highContrast
                     ? 'bg-yellow-400 text-black hover:bg-yellow-300'
                     : 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white'
@@ -1365,7 +1409,7 @@ export default function SeniorHomePage() {
                     </div>
 
                     {aiAnswer.isDemo && aiAnswer.diagnostics?.message && (
-                      <p className="text-[11px] text-amber-800 bg-amber-50 px-2.5 py-1 rounded-xl mb-2 font-cute border border-amber-200">
+                      <p className="text-xs text-amber-800 bg-amber-50 px-2.5 py-1 rounded-xl mb-2 font-cute border border-amber-200">
                         💡 {aiAnswer.diagnostics.message}
                       </p>
                     )}

@@ -8,6 +8,24 @@
   --font-scale: 1;
 }
 
+/* 글로벌 글자 크기 스케일링 (rem 기반 전역 확대/축소) */
+html {
+  font-size: 16px;
+  transition: font-size 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html[data-font-size="normal"] {
+  font-size: 16px;
+}
+
+html[data-font-size="large"] {
+  font-size: 19px;
+}
+
+html[data-font-size="xlarge"] {
+  font-size: 22.5px;
+}
+
 body {
   font-family: 'Jua', 'Gaegu', -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -26,18 +44,18 @@ body {
 
 /* 어르신 및 누구나 읽기 편한 큰 글씨 스타일 */
 .font-normal-senior {
-  font-size: 1.15rem; /* 18.5px */
-  line-height: 1.85;
+  font-size: 1.08rem;
+  line-height: 1.8;
 }
 
 .font-large-senior {
-  font-size: 1.4rem; /* 22.5px */
-  line-height: 2.05;
+  font-size: 1.15rem;
+  line-height: 1.85;
 }
 
 .font-xlarge-senior {
-  font-size: 1.7rem; /* 27px */
-  line-height: 2.25;
+  font-size: 1.22rem;
+  line-height: 1.95;
 }
 
 /* 젤리/사탕처럼 귀엽게 튀어오르는 버튼 애니메이션 */
