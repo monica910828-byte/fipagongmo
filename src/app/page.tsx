@@ -359,6 +359,57 @@ export default function SeniorHomePage() {
     setIsPlaying(false);
   }
 
+  // 어동이 5줄 이내 핵심 소식 요약 생성
+  function getExecutiveSummary(post: Post) {
+    let text = post.easyExplanation || post.summary || '';
+
+    // 공통 보일러플레이트 문구 제거
+    text = text.replace(/한국어촌어항공단에서 전해드리는 소식입니다\.?/g, '');
+    text = text.replace(/글자가 작아 읽기 어려우시다면[^]*?읽어드립니다\.?/g, '');
+    text = text.replace(/\[핵심 내용\]/g, '');
+
+    // 일정 및 문의처 추출
+    const dateMatch = text.match(/• 관련 일정:?\s*([^\n]+)/);
+    const phoneMatch = text.match(/• 문의 전화:?\s*([^\n]+)/);
+
+    text = text.replace(/• 관련 일정:?[^\n]+/g, '');
+    text = text.replace(/• 문의 전화:?[^\n]+/g, '');
+
+    // 공백 정돈
+    let clean = text
+      .replace(/\r\n/g, ' ')
+      .replace(/\n+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // 제목/부제 반복 제거
+    clean = clean.replace(/^[“"][^"”]+["”]\s*-?\s*/, '');
+    clean = clean.replace(/^-{1,2}\s*[^-\n]+\s*-{1,2}\s*/, '');
+    clean = clean.replace(/^[■◆▶□▲●★]\s*[가-힣\s]+\s*(ㅇ\s*)?/, '');
+
+    // 문장 단위로 분리하여 1~2개 핵심 문장 추출 (최대 160자 내외)
+    const sentences = clean.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 5);
+    let summarySentences: string[] = [];
+    let curLength = 0;
+
+    for (const s of sentences) {
+      if (summarySentences.length < 2 && (curLength + s.length) <= 170) {
+        summarySentences.push(s.trim());
+        curLength += s.length;
+      }
+    }
+
+    if (summarySentences.length === 0 && sentences[0]) {
+      summarySentences.push(sentences[0].slice(0, 140) + '...');
+    }
+
+    return {
+      summaryText: summarySentences.join(' ') || clean.slice(0, 140),
+      dateInfo: dateMatch ? dateMatch[1].trim() : null,
+      phoneInfo: phoneMatch ? phoneMatch[1].trim() : null,
+    };
+  }
+
   // 음성 인식 (STT) 시작
   function startVoiceRecognition() {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -958,7 +1009,7 @@ export default function SeniorHomePage() {
 
                   {/* 쉬운 내용 3줄 이내 요약 */}
                   <p className={`${textClass} line-clamp-3 mb-4 text-slate-700 leading-relaxed font-cute`}>
-                    {post.easyExplanation || post.summary}
+                    {getExecutiveSummary(post).summaryText}
                   </p>
 
                   {/* 하단 큰 버튼 액션 영역 (사탕처럼 톡톡 튀는 젤리 버튼) */}
@@ -1129,17 +1180,51 @@ export default function SeniorHomePage() {
                 );
               })()}
 
-              {/* 어르신 및 누구나 알기 쉬운 설명 상자 */}
-              <div className={`p-5 md:p-6 rounded-[28px] ${highContrast ? 'bg-zinc-900 border-2 border-yellow-400' : 'bg-amber-50/90 border-4 border-amber-200 shadow-sm'
-                }`}>
-                <h3 className="font-cute text-lg md:text-xl mb-3 flex items-center gap-2 text-amber-950">
-                  <Sparkles className="w-5 h-5 text-amber-500 animate-spin" />
-                  <span>어동이가 알기 쉽게 정리한 핵심 소식 📖</span>
-                </h3>
-                <div className={`${textClass} whitespace-pre-line leading-relaxed font-cute text-slate-800`}>
-                  {activePost.easyExplanation || activePost.summary}
-                </div>
-              </div>
+              {/* 어르신 및 누구나 알기 쉬운 설명 상자 (5줄 이내 핵심 요약) */}
+              {(() => {
+                const { summaryText, dateInfo, phoneInfo } = getExecutiveSummary(activePost);
+                return (
+                  <div className={`p-5 md:p-6 rounded-[28px] ${highContrast ? 'bg-zinc-900 border-2 border-yellow-400' : 'bg-amber-50/90 border-4 border-amber-200 shadow-sm'
+                    }`}>
+                    <div className="flex items-center justify-between mb-2.5">
+                      <h3 className="font-cute text-lg md:text-xl flex items-center gap-2 text-amber-950">
+                        <Sparkles className="w-5 h-5 text-amber-500 animate-spin" />
+                        <span>어동이가 알기 쉽게 정리한 핵심 소식 📖</span>
+                      </h3>
+                      <span className={`text-xs font-cute px-2.5 py-0.5 rounded-full font-bold ${
+                        highContrast ? 'bg-yellow-400 text-black' : 'bg-amber-200 text-amber-950'
+                      }`}>
+                        5줄 이내 핵심 요약
+                      </span>
+                    </div>
+
+                    {/* 5줄 이내 핵심 소식 본문 */}
+                    <p className={`${textClass} line-clamp-4 leading-relaxed font-cute ${
+                      highContrast ? 'text-yellow-100' : 'text-slate-800'
+                    }`}>
+                      {summaryText}
+                    </p>
+
+                    {/* 일정 및 문의처 요약 배지 (1줄) */}
+                    {(dateInfo || phoneInfo) && (
+                      <div className="mt-3 pt-2.5 border-t border-amber-200/80 flex flex-wrap items-center gap-2.5 text-xs md:text-sm font-cute">
+                        {dateInfo && (
+                          <span className="flex items-center gap-1 text-amber-900 bg-amber-100/90 px-2.5 py-1 rounded-xl border border-amber-300">
+                            <span>📅 관련 일정:</span>
+                            <strong>{dateInfo}</strong>
+                          </span>
+                        )}
+                        {phoneInfo && (
+                          <span className="flex items-center gap-1 text-emerald-900 bg-emerald-100/90 px-2.5 py-1 rounded-xl border border-emerald-300">
+                            <span>📞 문의 전화:</span>
+                            <strong>{phoneInfo}</strong>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* 공식 소식 전문 (문단별 전체 내용 보기) */}
               <div className={`p-5 md:p-6 rounded-[28px] ${highContrast ? 'bg-zinc-900 border-2 border-yellow-400' : 'bg-white border-4 border-sky-200 shadow-sm'
