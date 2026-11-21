@@ -79,15 +79,15 @@ function getOpenAiRuntimeConfig(): OpenAiRuntimeConfig {
 
 /**
  * 보안 안전한 서버 로그 진단 출력
+ * - VERCEL_ENV, OPENAI_API_KEY 존재 여부(true/false), DEMO_MODE 설정 여부, 실행 중인 Git 커밋 식별자만 기록합니다.
  * - API 키 원문/일부 문자열 및 전체 환경변수 목록은 절대 출력하지 않습니다.
  */
 function logSafeEnvDiagnostics(method: 'GET' | 'POST', cfg: OpenAiRuntimeConfig) {
   console.info(`[API ${method} /api/ai/ask] Runtime env diagnostics:`, {
-    vercelEnv: cfg.vercelEnv,
-    hasOpenAiApiKey: cfg.hasOpenAiApiKey,
-    isOpenAiApiKeyEmpty: cfg.isOpenAiApiKeyEmpty,
-    hasOpenAiModel: cfg.hasOpenAiModel,
-    isDemoModeActive: cfg.isDemoModeForced,
+    VERCEL_ENV: cfg.vercelEnv,
+    hasOpenAiApiKey: cfg.apiKeyConfigured,
+    demoModeConfigured: cfg.demoModeEnvConfigured,
+    commitSha: cfg.commitSha,
   });
 }
 

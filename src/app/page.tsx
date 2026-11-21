@@ -73,8 +73,9 @@ export default function SeniorHomePage() {
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState('');
 
-  // 상세 모달 및 오디오 재생 상태
+  // 상세 모달, 질문하기 모달 및 오디오 재생 상태
   const [activePost, setActivePost] = useState<Post | null>(null);
+  const [askModalPost, setAskModalPost] = useState<Post | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
 
@@ -89,8 +90,11 @@ export default function SeniorHomePage() {
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   const openPost = (post: Post) => {
+    setAskModalPost(null);
     setActivePost(post);
     setCurrentCardIndex(0);
+    setUserQuestion('');
+    setAiAnswer(null);
     // 소식 열람 횟수 비동기 집계
     fetch('/api/analytics', {
       method: 'POST',
@@ -102,6 +106,13 @@ export default function SeniorHomePage() {
         boardName: post.boardName,
       }),
     }).catch(() => {});
+  };
+
+  const openAskModal = (post: Post) => {
+    setActivePost(null);
+    setAskModalPost(post);
+    setUserQuestion('');
+    setAiAnswer(null);
   };
 
   useEffect(() => {
@@ -433,7 +444,7 @@ export default function SeniorHomePage() {
   }
 
   // 음성 인식 (STT) 시작
-  function startVoiceRecognition() {
+  function startVoiceRecognition(targetPostId?: string) {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       alert('음성 인식을 지원하지 않는 브라우저입니다. 텍스트 입력창을 이용해 주세요.');
@@ -453,7 +464,7 @@ export default function SeniorHomePage() {
       const transcript = event.results[0][0].transcript;
       setUserQuestion(transcript);
       setIsListening(false);
-      handleAskQuestion(transcript);
+      handleAskQuestion(transcript, targetPostId);
     };
 
     recognition.onerror = () => {
@@ -468,7 +479,7 @@ export default function SeniorHomePage() {
   }
 
   // 질문 전송 처리
-  async function handleAskQuestion(query?: string) {
+  async function handleAskQuestion(query?: string, targetPostId?: string) {
     const q = (query || userQuestion).trim();
     if (!q) return;
 
@@ -488,12 +499,14 @@ export default function SeniorHomePage() {
         headers['Authorization'] = `Bearer ${idToken}`;
       }
 
+      const resolvedPostId = targetPostId || askModalPost?.id || activePost?.id || undefined;
+
       const res = await fetch('/api/ai/ask', {
         method: 'POST',
         headers,
         body: JSON.stringify({
           question: q,
-          postId: activePost?.id || undefined,
+          postId: resolvedPostId,
         }),
       });
       const data = await res.json();
@@ -1070,7 +1083,7 @@ export default function SeniorHomePage() {
                     {getExecutiveSummary(post).summaryText}
                   </p>
 
-                  {/* 하단 큰 버튼 액션 영역 (사탕처럼 톡톡 튀는 젤리 버튼) */}
+                  {/* 하단 버튼 액션 영역 (어동이 목소리로 듣기 / 어동이에게 질문하기 / 자세히 보기) */}
                   <div className="flex flex-wrap items-center gap-2 pt-3 border-t-2 border-sky-100/60">
                     <button
                       onClick={() => {
@@ -1087,18 +1100,29 @@ export default function SeniorHomePage() {
                           }),
                         }).catch(() => {});
                       }}
-                      className={`flex-1 min-w-[160px] py-3.5 px-5 rounded-[22px] font-cute text-base md:text-lg flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 ${isPlaying
+                      className={`py-2.5 px-3.5 rounded-[20px] font-cute text-sm md:text-base flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 ${isPlaying
                         ? 'bg-rose-500 text-white animate-pulse'
                         : (highContrast ? 'bg-yellow-400 text-black hover:bg-yellow-300 ring-2 ring-yellow-200' : 'bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-500 text-white hover:brightness-105 shadow-sky-200')
                         }`}
                     >
-                      {isPlaying ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5 text-amber-300 animate-bounce" />}
+                      {isPlaying ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-amber-300 animate-bounce" />}
                       <span>{isPlaying ? '음성 멈추기' : '🎵 어동이 목소리로 듣기'}</span>
                     </button>
 
                     <button
+                      onClick={() => openAskModal(post)}
+                      className={`py-2.5 px-3.5 rounded-[20px] font-cute text-sm md:text-base flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 ${highContrast
+                        ? 'bg-yellow-400 text-black hover:bg-yellow-300 border-2 border-yellow-200'
+                        : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-emerald-200'
+                        }`}
+                    >
+                      <MessageCircle className="w-4 h-4 text-amber-200" />
+                      <span>어동이에게 질문하기</span>
+                    </button>
+
+                    <button
                       onClick={() => openPost(post)}
-                      className={`py-3.5 px-5 rounded-[22px] font-cute text-base md:text-lg flex items-center gap-1.5 transition-all shadow-sm active:scale-95 ${highContrast
+                      className={`py-2.5 px-3.5 rounded-[20px] font-cute text-sm md:text-base flex items-center gap-1.5 transition-all shadow-sm active:scale-95 ${highContrast
                         ? 'bg-zinc-800 text-yellow-300 hover:bg-zinc-700 border-2 border-yellow-400'
                         : 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-2 border-amber-300'
                         }`}
@@ -1110,10 +1134,10 @@ export default function SeniorHomePage() {
                       href={post.originalUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="p-3.5 rounded-[22px] bg-sky-50 hover:bg-sky-100 text-sky-700 hover:text-sky-900 transition-all shadow-sm border border-sky-200"
+                      className="p-2.5 rounded-[20px] bg-sky-50 hover:bg-sky-100 text-sky-700 hover:text-sky-900 transition-all shadow-sm border border-sky-200 ml-auto"
                       title="공단 홈페이지 원본 게시물 보기"
                     >
-                      <ExternalLink className="w-5 h-5" />
+                      <ExternalLink className="w-4 h-4" />
                     </a>
                   </div>
                 </article>
@@ -1360,13 +1384,13 @@ export default function SeniorHomePage() {
                     type="text"
                     value={userQuestion}
                     onChange={(e) => setUserQuestion(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAskQuestion()}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAskQuestion(undefined, activePost.id)}
                     placeholder="예: 신청 자격이 어떻게 되나요? 언제까지예요?"
                     className={`flex-1 py-3.5 px-4 rounded-2xl border-2 font-cute text-base md:text-lg ${highContrast ? 'bg-black border-yellow-400 text-yellow-200' : 'bg-white border-emerald-300 text-slate-900 shadow-sm focus:border-emerald-500'
                       }`}
                   />
                   <button
-                    onClick={startVoiceRecognition}
+                    onClick={() => startVoiceRecognition(activePost.id)}
                     className={`p-3.5 rounded-2xl font-cute flex items-center justify-center transition-all shadow-md active:scale-95 ${isListening
                       ? 'bg-rose-500 text-white animate-pulse'
                       : 'bg-emerald-600 hover:bg-emerald-700 text-white'
@@ -1376,7 +1400,7 @@ export default function SeniorHomePage() {
                     {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
                   </button>
                   <button
-                    onClick={() => handleAskQuestion()}
+                    onClick={() => handleAskQuestion(undefined, activePost.id)}
                     disabled={isAsking}
                     className="py-3.5 px-5 rounded-2xl bg-[#0284C7] hover:bg-[#0369A1] text-white font-cute text-base flex items-center gap-1.5 shadow-md active:scale-95"
                   >
@@ -1430,6 +1454,194 @@ export default function SeniorHomePage() {
                   className="inline-flex items-center gap-1.5 text-base font-cute text-[#0284C7] hover:underline"
                 >
                   <span>한국어촌어항공단 공식 홈페이지 원문 확인하기</span>
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 8-1. 어동이에게 바로 질문하기 전용 AI 모달 */}
+      {askModalPost && (
+        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-3 sm:p-4 overflow-y-auto backdrop-blur-xs">
+          <div className={`w-full max-w-2xl max-h-[90vh] rounded-[36px] overflow-hidden flex flex-col shadow-2xl border-4 ${highContrast ? 'bg-zinc-950 border-yellow-400 text-yellow-300' : 'bg-white border-emerald-200 text-slate-900'
+            }`}>
+
+            {/* 모달 헤더 */}
+            <div className={`p-4 sm:p-5 flex items-center justify-between border-b ${highContrast ? 'border-yellow-400/50 bg-zinc-900' : 'bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 text-white'
+              }`}>
+              <div className="flex items-center gap-2.5">
+                <div className="w-11 h-11 rounded-2xl bg-white p-1 shadow-sm flex items-center justify-center border-2 border-amber-300 flex-shrink-0">
+                  <img src="/eodongi_official.png" alt="어동이 질문" className="w-9 h-9 object-contain" />
+                </div>
+                <div>
+                  <h2 className="font-cute text-lg md:text-xl leading-tight">
+                    어동이에게 질문해 보세요! 💬
+                  </h2>
+                  <p className="text-xs opacity-90 font-cute">
+                    AI가 선택하신 공단 소식을 읽고 친절하게 답해드려요
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  stopVoice();
+                  setAskModalPost(null);
+                  setAiAnswer(null);
+                }}
+                className={`p-2 rounded-2xl transition-colors ${highContrast ? 'bg-yellow-400 text-black' : 'bg-white/20 hover:bg-white/35 text-white'
+                  }`}
+                title="닫기"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* 모달 본문 */}
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-5 flex-1 bg-bubble-pattern">
+
+              {/* 선택된 소식 정보 배너 */}
+              <div className={`p-4 rounded-2xl border-2 ${highContrast ? 'bg-zinc-900 border-yellow-400 text-yellow-200' : 'bg-sky-50/90 border-sky-200 text-slate-800'
+                }`}>
+                <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-cute font-bold ${highContrast ? 'bg-yellow-400 text-black' : 'bg-[#0284C7] text-white'
+                    }`}>
+                    📌 {askModalPost.boardName}
+                  </span>
+                  <span className="text-xs opacity-75 font-cute">📅 {askModalPost.registeredDate}</span>
+                </div>
+                <p className="font-cute text-base md:text-lg leading-snug font-bold">
+                  {askModalPost.title}
+                </p>
+              </div>
+
+              {/* 질문 입력 및 AI 답변 박스 (자세히 보기와 동일한 형식) */}
+              <div className={`p-5 md:p-6 rounded-[28px] border-4 ${highContrast ? 'bg-zinc-900 border-yellow-400' : 'bg-gradient-to-r from-emerald-50 via-teal-50 to-sky-50 border-emerald-200 shadow-sm'
+                }`}>
+                <div className="flex items-center gap-3.5 mb-3">
+                  <div className="flex-shrink-0">
+                    <img src="/eodongi_official.png" alt="어동이 경청" className="w-14 h-14 object-contain drop-shadow" />
+                  </div>
+                  <div>
+                    <h3 className="font-cute text-base md:text-lg text-emerald-950">
+                      궁금한 점을 말씀하시거나 입력해 주세요!
+                    </h3>
+                    <p className="text-xs md:text-sm text-emerald-700 font-cute">
+                      마이크 버튼을 누르고 말씀하시거나 글자로 물어보시면 AI가 답해드려요.
+                    </p>
+                  </div>
+                </div>
+
+                {/* 자주 묻는 빠른 질문 버튼 */}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {[
+                    '이 소식의 핵심 내용을 쉽게 요약해 주세요',
+                    '신청 대상과 기간이 어떻게 되나요?',
+                    '어디로 문의하면 되나요?',
+                  ].map((sampleQ) => (
+                    <button
+                      key={sampleQ}
+                      onClick={() => {
+                        setUserQuestion(sampleQ);
+                        handleAskQuestion(sampleQ, askModalPost.id);
+                      }}
+                      disabled={isAsking}
+                      className={`px-3 py-1 rounded-full text-xs font-cute transition-all active:scale-95 ${highContrast
+                        ? 'bg-zinc-800 text-yellow-200 border border-yellow-400 hover:bg-zinc-700'
+                        : 'bg-white/90 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 shadow-2xs'
+                        }`}
+                    >
+                      ✨ {sampleQ}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex gap-2 mb-3 mt-2">
+                  <input
+                    type="text"
+                    value={userQuestion}
+                    onChange={(e) => setUserQuestion(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAskQuestion(undefined, askModalPost.id)}
+                    placeholder="예: 신청 자격이 어떻게 되나요? 언제까지예요?"
+                    className={`flex-1 py-3.5 px-4 rounded-2xl border-2 font-cute text-base md:text-lg ${highContrast ? 'bg-black border-yellow-400 text-yellow-200' : 'bg-white border-emerald-300 text-slate-900 shadow-sm focus:border-emerald-500'
+                      }`}
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => startVoiceRecognition(askModalPost.id)}
+                    className={`p-3.5 rounded-2xl font-cute flex items-center justify-center transition-all shadow-md active:scale-95 ${isListening
+                      ? 'bg-rose-500 text-white animate-pulse'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      }`}
+                    title="마이크로 말하기"
+                  >
+                    {isListening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+                  </button>
+                  <button
+                    onClick={() => handleAskQuestion(undefined, askModalPost.id)}
+                    disabled={isAsking}
+                    className="py-3.5 px-5 rounded-2xl bg-[#0284C7] hover:bg-[#0369A1] text-white font-cute text-base flex items-center gap-1.5 shadow-md active:scale-95"
+                  >
+                    <Send className="w-5 h-5" />
+                    <span>질문하기</span>
+                  </button>
+                </div>
+
+                {isAsking && (
+                  <div className="p-3 text-center text-sm font-cute text-emerald-800 animate-pulse bg-white/80 rounded-2xl border border-emerald-200">
+                    어동이가 공단 소식에서 정답을 열심히 찾고 있습니다... 🐬✨
+                  </div>
+                )}
+
+                {aiAnswer && (
+                  <div className={`p-4 rounded-2xl mt-3 shadow-sm ${highContrast ? 'bg-black border border-yellow-400 text-yellow-300' : 'bg-white border-2 border-emerald-300 text-slate-900'
+                    }`}>
+                    <div className="flex items-center justify-between mb-2 pb-2 border-b border-emerald-100 font-cute">
+                      <span className="text-emerald-800 text-base flex items-center gap-1.5 font-bold">
+                        <CheckCircle className="w-5 h-5 text-emerald-600" />
+                        어동이의 AI 답변 {!aiAnswer.isDemo ? '(AI 실시간 연동 ✨)' : '(공단 기본 안내 ℹ️)'}
+                      </span>
+                      <button
+                        onClick={() => playVoice(aiAnswer.voiceScript)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-cute flex items-center gap-1 shadow-sm"
+                      >
+                        <Volume2 className="w-4 h-4" />
+                        <span>답변 다시 듣기</span>
+                      </button>
+                    </div>
+
+                    {aiAnswer.isDemo && aiAnswer.diagnostics?.message && (
+                      <p className="text-xs text-amber-800 bg-amber-50 px-2.5 py-1 rounded-xl mb-2 font-cute border border-amber-200">
+                        💡 {aiAnswer.diagnostics.message}
+                      </p>
+                    )}
+
+                    <p className={`${textClass} whitespace-pre-line leading-relaxed font-cute`}>
+                      {aiAnswer.text}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* 하단 전체 내용 자세히 보기 이동 버튼 */}
+              <div className="pt-1 flex items-center justify-between gap-2">
+                <button
+                  onClick={() => openPost(askModalPost)}
+                  className={`px-4 py-2 rounded-2xl font-cute text-sm flex items-center gap-1.5 transition-all ${highContrast
+                    ? 'bg-zinc-800 text-yellow-300 border border-yellow-400'
+                    : 'bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300'
+                    }`}
+                >
+                  <span>📖 이 소식 전체 내용 자세히 보기</span>
+                </button>
+                <a
+                  href={askModalPost.originalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-sm font-cute text-[#0284C7] hover:underline"
+                >
+                  <span>공단 원문 보기</span>
                   <ExternalLink className="w-4 h-4" />
                 </a>
               </div>
