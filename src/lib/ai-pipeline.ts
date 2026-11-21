@@ -10,6 +10,12 @@ export interface AiTransformResult {
   inspectionStatus: 'AUTO_PUBLISHED' | 'PENDING_REVIEW';
   aiModelUsed: string;
   isDemo: boolean;
+  diagnostics?: {
+    status: string;
+    apiKeyConfigured: boolean;
+    openAiAttempted: boolean;
+    httpStatus?: number | null;
+  };
 }
 
 // 정책/안전 관련 핵심 키워드 목록 (검수 대상으로 자동 분류할 기준)
@@ -146,23 +152,48 @@ export async function transformContentWithOpenAI(
   boardType: string,
   cardImagesCount: number = 0
 ): Promise<AiTransformResult> {
-  const apiKey = (
-    process.env.OPENAI_API_KEY ||
-    process.env.VITE_OPENAI_API_KEY ||
-    process.env.NEXT_PUBLIC_OPENAI_API_KEY
-  )?.trim();
-  const modelName = (
-    process.env.OPENAI_MODEL ||
-    process.env.VITE_OPENAI_MODEL ||
-    'gpt-4o'
-  ).trim();
+  // 서버 전용 환경변수 process.env.OPENAI_API_KEY만 사용 (VITE_ / NEXT_PUBLIC_ 대체 경로 제거)
+  const rawApiKey = process.env.OPENAI_API_KEY;
+  const apiKey = typeof rawApiKey === 'string' ? rawApiKey.trim() : '';
+  const apiKeyConfigured = apiKey.length > 0;
+  const modelName = (process.env.OPENAI_MODEL || '').trim() || 'gpt-4o';
 
-  const isDemo = process.env.DEMO_MODE === 'true';
+  const vercelEnvRaw = process.env.VERCEL_ENV || null;
+  const nodeEnv = process.env.NODE_ENV || 'unknown';
+  const isProductionEnv = vercelEnvRaw === 'production' || (nodeEnv === 'production' && !vercelEnvRaw);
+  const demoModeEnvConfigured = (process.env.DEMO_MODE || '').trim().toLowerCase() === 'true';
+  // 운영 환경(Production)에서는 DEMO_MODE=true가 설정되어 있어도 실제 OpenAI API를 호출
+  const isDemoModeForced = !isProductionEnv && demoModeEnvConfigured;
 
-  // API 키가 없거나 DEMO_MODE=true 인 경우 데모 규칙 엔진으로 안전하게 동작
-  if (!apiKey || isDemo) {
+  console.info('[AI Pipeline] Runtime env check:', {
+    apiKeyConfigured,
+    modelConfigured: modelName,
+    isDemoModeForced,
+    demoModeEnvConfigured,
+    isProductionEnv,
+    vercelEnv: vercelEnvRaw || 'local',
+    nodeEnv,
+  });
+
+  if (isDemoModeForced) {
     const fallback = transformContentWithRuleEngine(title, rawText, boardType, cardImagesCount);
-    fallback.aiModelUsed = isDemo ? 'demo-mode-forced' : 'demo-rule-engine';
+    fallback.aiModelUsed = 'demo-mode-forced';
+    fallback.diagnostics = {
+      status: 'DEMO_MODE_ACTIVE',
+      apiKeyConfigured,
+      openAiAttempted: false,
+    };
+    return fallback;
+  }
+
+  if (!apiKeyConfigured) {
+    const fallback = transformContentWithRuleEngine(title, rawText, boardType, cardImagesCount);
+    fallback.aiModelUsed = 'missing-api-key';
+    fallback.diagnostics = {
+      status: 'MISSING_API_KEY',
+      apiKeyConfigured: false,
+      openAiAttempted: false,
+    };
     return fallback;
   }
 
@@ -200,6 +231,7 @@ ${rawText.slice(0, 4000)}
 </UNTRUSTED_CONTENT>`;
 
   try {
+    let usedModel = modelName;
     let response;
     try {
       response = await openai.chat.completions.create({
@@ -212,9 +244,12 @@ ${rawText.slice(0, 4000)}
         temperature: 0.2, // 환각 방지를 위한 낮은 온도
       });
     } catch (mErr: any) {
-      if (modelName !== 'gpt-4o') {
+      const isModelIssue =
+        mErr?.status === 404 || mErr?.status === 400 || mErr?.code === 'model_not_found';
+      if (isModelIssue) {
+        usedModel = modelName === 'gpt-4o' ? 'gpt-4o-mini' : 'gpt-4o';
         response = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: usedModel,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userContent },
@@ -229,7 +264,7 @@ ${rawText.slice(0, 4000)}
 
     const content = response.choices[0]?.message?.content;
     if (!content) {
-      throw new Error('OpenAI 빈 응답');
+      throw new Error('OPENAI_EMPTY_RESPONSE');
     }
 
     const parsed = JSON.parse(content);
@@ -244,14 +279,45 @@ ${rawText.slice(0, 4000)}
       isSafetyOrPolicy,
       policyKeywords: Array.isArray(parsed.policyKeywords) ? parsed.policyKeywords : [],
       inspectionStatus,
-      aiModelUsed: modelName,
+      aiModelUsed: usedModel,
       isDemo: false,
+      diagnostics: {
+        status: 'SUCCESS',
+        apiKeyConfigured: true,
+        openAiAttempted: true,
+      },
     };
-  } catch (error) {
-    console.error('OpenAI 변환 중 오류 발생, 규칙 엔진으로 폴백:', error);
-    // 오류 시 안전하게 규칙 엔진 결과로 폴백
+  } catch (error: any) {
+    const httpStatus: number | null = typeof error?.status === 'number' ? error.status : null;
+    const failureStatus =
+      httpStatus === 401
+        ? 'INVALID_API_KEY'
+        : httpStatus === 429
+        ? 'QUOTA_EXCEEDED'
+        : httpStatus === 404
+        ? 'MODEL_NOT_FOUND'
+        : httpStatus === 403
+        ? 'PERMISSION_DENIED'
+        : 'OPENAI_API_FAILED';
+
+    console.error('[AI Pipeline] OpenAI API call failed:', {
+      apiKeyConfigured: true,
+      status: failureStatus,
+      httpStatus,
+      errorCode: error?.code ?? error?.type ?? null,
+      modelConfigured: modelName,
+      vercelEnv: vercelEnvRaw || 'local',
+    });
+
+    // 오류 시 안전하게 규칙 엔진 결과로 폴백하되 키 부재가 아닌 API 호출 실패임을 명시
     const fallback = transformContentWithRuleEngine(title, rawText, boardType, cardImagesCount);
-    fallback.aiModelUsed = `fallback-${modelName}`;
+    fallback.aiModelUsed = `fallback-${failureStatus.toLowerCase()}`;
+    fallback.diagnostics = {
+      status: failureStatus,
+      apiKeyConfigured: true,
+      openAiAttempted: true,
+      httpStatus,
+    };
     return fallback;
   }
 }
