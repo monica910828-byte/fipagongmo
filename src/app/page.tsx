@@ -517,7 +517,6 @@ export default function SeniorHomePage() {
           isDemo: data.isDemo,
           diagnostics: data.diagnostics,
         });
-        playVoice(data.voiceScript);
       } else {
         alert(data.error || '답변을 불러오지 못했습니다.');
       }
@@ -1424,11 +1423,14 @@ export default function SeniorHomePage() {
                         어동이의 AI 답변 {!aiAnswer.isDemo ? '(GPT-4o 실시간 연동 ✨)' : '(공단 기본 안내 ℹ️)'}
                       </span>
                       <button
-                        onClick={() => playVoice(aiAnswer.voiceScript)}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-cute flex items-center gap-1 shadow-sm"
+                        onClick={() => toggleVoice(aiAnswer.voiceScript)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-cute flex items-center gap-1 shadow-sm transition-colors ${isPlaying
+                          ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse'
+                          : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-900'
+                          }`}
                       >
-                        <Volume2 className="w-4 h-4" />
-                        <span>답변 다시 듣기</span>
+                        {isPlaying ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                        <span>{isPlaying ? '음성 멈추기' : '음성 듣기'}</span>
                       </button>
                     </div>
 
@@ -1603,11 +1605,14 @@ export default function SeniorHomePage() {
                         어동이의 AI 답변 {!aiAnswer.isDemo ? '(AI 실시간 연동 ✨)' : '(공단 기본 안내 ℹ️)'}
                       </span>
                       <button
-                        onClick={() => playVoice(aiAnswer.voiceScript)}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-cute flex items-center gap-1 shadow-sm"
+                        onClick={() => toggleVoice(aiAnswer.voiceScript)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-cute flex items-center gap-1 shadow-sm transition-colors ${isPlaying
+                          ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse'
+                          : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-900'
+                          }`}
                       >
-                        <Volume2 className="w-4 h-4" />
-                        <span>답변 다시 듣기</span>
+                        {isPlaying ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                        <span>{isPlaying ? '음성 멈추기' : '음성 듣기'}</span>
                       </button>
                     </div>
 
