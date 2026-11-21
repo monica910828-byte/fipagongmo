@@ -10,7 +10,7 @@ import Eodongi from '@/components/Eodongi';
 import AdminAnalyticsSection from '@/components/AdminAnalyticsSection';
 import { useFirebaseAuth } from '@/lib/useFirebaseAuth';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth, isFirebaseConfigured } from '@/lib/firebase';
+import { auth, isFirebaseConfigured, getMissingFirebaseEnvVars } from '@/lib/firebase';
 
 interface BoardStat {
   boardType: string;
@@ -111,7 +111,10 @@ export default function AdminDashboardPage() {
     }
 
     if (!auth || !isFirebaseConfigured()) {
-      setLoginError('Firebase 설정이 완료되지 않았습니다. .env.local을 확인해 주세요.');
+      const missing = getMissingFirebaseEnvVars();
+      const detail = missing.length > 0 ? ` (누락된 변수: ${missing.join(', ')})` : '';
+      setLoginError(`Firebase 설정이 완료되지 않았습니다.${detail}`);
+      console.warn('[Firebase Auth 진단] 누락된 환경변수:', missing);
       return;
     }
 

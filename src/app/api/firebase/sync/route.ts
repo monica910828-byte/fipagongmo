@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isFirebaseConfigured, firebaseConfig } from '@/lib/firebase';
+import { isFirebaseConfigured, firebaseConfig, getMissingFirebaseEnvVars } from '@/lib/firebase';
 import { getFirestorePosts, bulkSyncPostsToFirestore } from '@/lib/firestore-service';
 import { FALLBACK_POSTS } from '@/lib/fallback-posts';
 import prisma from '@/lib/prisma';
@@ -34,9 +34,12 @@ export async function GET() {
  */
 export async function POST() {
   if (!isFirebaseConfigured()) {
+    const missing = getMissingFirebaseEnvVars();
+    const detail = missing.length > 0 ? ` (누락된 변수: ${missing.join(', ')})` : '';
     return NextResponse.json({
       success: false,
-      error: 'Firebase 설정이 완료되지 않았습니다. .env.local 파일에 Firebase 키를 입력해 주세요.',
+      error: `Firebase 설정이 완료되지 않았습니다.${detail}`,
+      missingVars: missing,
     }, { status: 400 });
   }
 

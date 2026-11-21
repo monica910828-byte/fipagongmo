@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Mail, Lock, Eye, EyeOff, X, LogIn, AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth, isFirebaseConfigured } from '@/lib/firebase';
+import { auth, isFirebaseConfigured, getMissingFirebaseEnvVars } from '@/lib/firebase';
 import Eodongi from '@/components/Eodongi';
 
 interface AdminLoginModalProps {
@@ -31,7 +31,10 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
     }
 
     if (!auth || !isFirebaseConfigured()) {
-      setErrorMessage('Firebase 설정이 완료되지 않았습니다. .env.local을 확인해 주세요.');
+      const missing = getMissingFirebaseEnvVars();
+      const detail = missing.length > 0 ? ` (누락된 변수: ${missing.join(', ')})` : '';
+      setErrorMessage(`Firebase 설정이 완료되지 않았습니다.${detail}`);
+      console.warn('[Firebase Auth 진단] 누락된 환경변수:', missing);
       return;
     }
 
