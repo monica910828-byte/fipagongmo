@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { transformContentWithOpenAI } from '@/lib/ai-pipeline';
 import { FALLBACK_POSTS } from '@/lib/fallback-posts';
+import { isFirebaseConfigured } from '@/lib/firebase';
+import { getFirestorePostById, updatePostStatusInFirestore } from '@/lib/firestore-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +12,15 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    // 1. Firestore 조회
+    if (isFirebaseConfigured()) {
+      try {
+        const fPost = await getFirestorePostById(params.id);
+        if (fPost) return NextResponse.json({ success: true, post: fPost });
+      } catch {}
+    }
+
+    // 2. Prisma 로컬 조회
     let post: any = null;
     try {
       post = await prisma.post.findUnique({
@@ -19,6 +30,7 @@ export async function GET(
       console.warn('Prisma get post error, searching fallback:', e);
     }
 
+    // 3. 폴백 조회
     if (!post) {
       post = FALLBACK_POSTS.find(p => p.id === params.id || p.nttSn === params.id) || null;
     }
@@ -45,18 +57,36 @@ export async function PATCH(
     const body = await req.json();
     const { inspectionStatus, summary, easyExplanation, voiceScript } = body;
 
-    const dataToUpdate: any = {};
-    if (inspectionStatus) dataToUpdate.inspectionStatus = inspectionStatus;
-    if (summary !== undefined) dataToUpdate.summary = summary;
-    if (easyExplanation !== undefined) dataToUpdate.easyExplanation = easyExplanation;
-    if (voiceScript !== undefined) dataToUpdate.voiceScript = voiceScript;
+    const extraUpdates: any = {};
+    if (summary !== undefined) extraUpdates.summary = summary;
+    if (easyExplanation !== undefined) extraUpdates.easyExplanation = easyExplanation;
+    if (voiceScript !== undefined) extraUpdates.voiceScript = voiceScript;
 
-    const updated = await prisma.post.update({
-      where: { id: params.id },
-      data: dataToUpdate,
-    });
+    // Firestore 동기화
+    if (isFirebaseConfigured()) {
+      try {
+        await updatePostStatusInFirestore(params.id, inspectionStatus, extraUpdates);
+      } catch (fErr) {
+        console.warn('Firestore update error:', fErr);
+      }
+    }
 
-    return NextResponse.json({ success: true, post: updated });
+    // Prisma 로컬 업데이트
+    try {
+      const updated = await prisma.post.update({
+        where: { id: params.id },
+        data: {
+          ...(inspectionStatus ? { inspectionStatus } : {}),
+          ...extraUpdates,
+        },
+      });
+      return NextResponse.json({ success: true, post: updated });
+    } catch {
+      return NextResponse.json({
+        success: true,
+        post: { id: params.id, inspectionStatus, ...extraUpdates },
+      });
+    }
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
@@ -69,11 +99,19 @@ export async function POST(
 ) {
   try {
     let post: any = null;
-    try {
-      post = await prisma.post.findUnique({
-        where: { id: params.id },
-      });
-    } catch (e) {}
+    if (isFirebaseConfigured()) {
+      try {
+        post = await getFirestorePostById(params.id);
+      } catch {}
+    }
+
+    if (!post) {
+      try {
+        post = await prisma.post.findUnique({
+          where: { id: params.id },
+        });
+      } catch (e) {}
+    }
 
     if (!post) {
       post = FALLBACK_POSTS.find(p => p.id === params.id || p.nttSn === params.id) || null;
@@ -92,36 +130,32 @@ export async function POST(
       cardImages.length
     );
 
+    const updatedData = {
+      summary: aiResult.summary,
+      easyExplanation: aiResult.easyExplanation,
+      voiceScript: aiResult.voiceScript,
+      qnaPairs: JSON.stringify(aiResult.qnaPairs),
+      isSafetyOrPolicy: aiResult.isSafetyOrPolicy,
+      policyKeywords: aiResult.policyKeywords.join(', '),
+      inspectionStatus: aiResult.isSafetyOrPolicy ? 'PENDING_REVIEW' : 'AUTO_PUBLISHED',
+      aiModelUsed: aiResult.aiModelUsed,
+      isDemo: aiResult.isDemo,
+    };
+
+    if (isFirebaseConfigured()) {
+      try {
+        await updatePostStatusInFirestore(params.id, updatedData.inspectionStatus, updatedData);
+      } catch {}
+    }
+
     try {
       const updated = await prisma.post.update({
         where: { id: params.id },
-        data: {
-          summary: aiResult.summary,
-          easyExplanation: aiResult.easyExplanation,
-          voiceScript: aiResult.voiceScript,
-          qnaPairs: JSON.stringify(aiResult.qnaPairs),
-          isSafetyOrPolicy: aiResult.isSafetyOrPolicy,
-          policyKeywords: aiResult.policyKeywords.join(', '),
-          inspectionStatus: aiResult.isSafetyOrPolicy ? 'PENDING_REVIEW' : 'AUTO_PUBLISHED',
-          aiModelUsed: aiResult.aiModelUsed,
-          isDemo: aiResult.isDemo,
-        },
+        data: updatedData,
       });
       return NextResponse.json({ success: true, post: updated, aiResult });
     } catch {
-      // In-memory response if DB is read-only
-      const updated = {
-        ...post,
-        summary: aiResult.summary,
-        easyExplanation: aiResult.easyExplanation,
-        voiceScript: aiResult.voiceScript,
-        qnaPairs: JSON.stringify(aiResult.qnaPairs),
-        isSafetyOrPolicy: aiResult.isSafetyOrPolicy,
-        policyKeywords: aiResult.policyKeywords.join(', '),
-        inspectionStatus: aiResult.isSafetyOrPolicy ? 'PENDING_REVIEW' : 'AUTO_PUBLISHED',
-        aiModelUsed: aiResult.aiModelUsed,
-        isDemo: aiResult.isDemo,
-      };
+      const updated = { ...post, ...updatedData };
       return NextResponse.json({ success: true, post: updated, aiResult });
     }
   } catch (error: any) {

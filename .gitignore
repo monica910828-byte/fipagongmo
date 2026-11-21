@@ -25,6 +25,7 @@ dist-ssr
 
 # Next.js & Local DB
 .next
+*.tsbuildinfo
 
 # Environment variables & Sensitive files
 .env

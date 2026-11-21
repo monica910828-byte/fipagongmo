@@ -3,9 +3,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   RefreshCw, CheckCircle2, AlertTriangle, Clock, Server, FileText,
-  ShieldAlert, Settings, ExternalLink, Eye, EyeOff, Play, Info, Check, X
+  ShieldAlert, Settings, ExternalLink, Eye, EyeOff, Play, Info, Check, X,
+  Database, Cloud, UploadCloud, Flame, Key, LogOut, Lock, Mail, Loader2, ShieldCheck
 } from 'lucide-react';
 import Eodongi from '@/components/Eodongi';
+import { useFirebaseAuth } from '@/lib/useFirebaseAuth';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth, isFirebaseConfigured } from '@/lib/firebase';
 
 interface BoardStat {
   boardType: string;
@@ -59,6 +63,14 @@ interface AdminPost {
 }
 
 export default function AdminDashboardPage() {
+  // Firebase Auth 관리자 인증 가드
+  const { user, loading: authLoading, logout } = useFirebaseAuth();
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [loginSubmitting, setLoginSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState('');
+
   const [syncData, setSyncData] = useState<SyncData | null>(null);
   const [posts, setPosts] = useState<AdminPost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,9 +88,93 @@ export default function AdminDashboardPage() {
   const [inspectingPost, setInspectingPost] = useState<AdminPost | null>(null);
   const [reAnalyzingId, setReAnalyzingId] = useState<string | null>(null);
 
+  // Firebase Firestore 연결 상태
+  const [firebaseStatus, setFirebaseStatus] = useState<{ configured: boolean; projectId?: string; storageBucket?: string; firestorePostCount: number } | null>(null);
+  const [isSyncingFirebase, setIsSyncingFirebase] = useState(false);
+  const [showFirebaseGuide, setShowFirebaseGuide] = useState(false);
+
   useEffect(() => {
-    loadAllData();
-  }, []);
+    if (user) {
+      loadAllData();
+      loadFirebaseStatus();
+    }
+  }, [user]);
+
+  const handleDirectLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+
+    if (!loginEmail.trim() || !loginPassword.trim()) {
+      setLoginError('이메일과 비밀번호를 모두 입력해 주세요.');
+      return;
+    }
+
+    if (!auth || !isFirebaseConfigured()) {
+      setLoginError('Firebase 설정이 완료되지 않았습니다. .env.local을 확인해 주세요.');
+      return;
+    }
+
+    setLoginSubmitting(true);
+    try {
+      await signInWithEmailAndPassword(auth, loginEmail.trim(), loginPassword);
+      setLoginSubmitting(false);
+    } catch (err: any) {
+      setLoginSubmitting(false);
+      console.error('관리자 로그인 에러:', err.code, err.message);
+      switch (err.code) {
+        case 'auth/invalid-email':
+          setLoginError('올바른 이메일 주소 형식을 입력해 주세요.');
+          break;
+        case 'auth/user-not-found':
+          setLoginError('등록되지 않은 관리자 계정입니다.');
+          break;
+        case 'auth/wrong-password':
+        case 'auth/invalid-credential':
+          setLoginError('이메일 또는 비밀번호가 일치하지 않습니다.');
+          break;
+        case 'auth/too-many-requests':
+          setLoginError('로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.');
+          break;
+        case 'auth/user-disabled':
+          setLoginError('비활성화된 계정입니다. 관리자에게 문의하세요.');
+          break;
+        default:
+          setLoginError('로그인에 실패했습니다. 이메일과 비밀번호를 다시 확인해 주세요.');
+      }
+    }
+  };
+
+  async function loadFirebaseStatus() {
+    try {
+      const res = await fetch('/api/firebase/sync');
+      const data = await res.json();
+      if (data.success) {
+        setFirebaseStatus(data);
+      }
+    } catch (e) {
+      console.warn('Firebase 상태 조회 실패:', e);
+    }
+  }
+
+  // Firebase Firestore 일괄 동기화 실행
+  async function handleSyncToFirebase() {
+    setIsSyncingFirebase(true);
+    try {
+      const res = await fetch('/api/firebase/sync', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        alert(data.message || 'Firestore 클라우드 동기화 성공!');
+        await loadFirebaseStatus();
+        await loadAllData();
+      } else {
+        alert(data.error || 'Firestore 동기화 실패');
+      }
+    } catch (e: any) {
+      alert(`동기화 요청 실패: ${e.message}`);
+    } finally {
+      setIsSyncingFirebase(false);
+    }
+  }
 
   async function loadAllData() {
     setLoading(true);
@@ -207,6 +303,133 @@ export default function AdminDashboardPage() {
     return matchesBoard && matchesStatus;
   });
 
+  // 1. Firebase Auth 로딩 중
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4">
+        <div className="w-16 h-16 bg-white rounded-3xl p-1 mb-4 shadow-xl flex items-center justify-center animate-bounce">
+          <Eodongi size={56} pose="happy" />
+        </div>
+        <div className="flex items-center gap-2 font-cute text-base text-slate-300">
+          <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
+          <span>관리자 인증 상태를 확인하고 있습니다...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. 미인증 상태 -> 로그인 화면 표시 (관리자 페이지 데이터 절대 비공개)
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border-4 border-sky-300 overflow-hidden">
+          {/* Header with Eodongi */}
+          <div className="bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-700 px-6 py-6 text-white text-center">
+            <div className="w-16 h-16 bg-white rounded-2xl p-1 mx-auto mb-3 shadow-lg flex items-center justify-center">
+              <Eodongi size={56} pose="happy" />
+            </div>
+            <span className="inline-block px-3 py-0.5 rounded-full bg-amber-400 text-blue-950 text-xs font-cute font-bold mb-1 shadow-sm">
+              FiPA ADMIN GUARD
+            </span>
+            <h1 className="text-2xl font-cute font-bold tracking-wide">
+              관리자 모드 로그인
+            </h1>
+            <p className="text-xs text-sky-100 font-cute mt-1">
+              관리자 전용 대시보드는 로그인 후 이용하실 수 있습니다.
+            </p>
+          </div>
+
+          {/* Form */}
+          <div className="p-6">
+            {loginError && (
+              <div className="mb-4 p-3 rounded-2xl bg-rose-50 border-2 border-rose-200 text-rose-700 text-xs font-cute flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleDirectLogin} className="space-y-4">
+              <div>
+                <label className="block text-xs font-cute text-slate-700 mb-1.5 ml-1">
+                  관리자 이메일 계정
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                    <Mail className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="email"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="admin@fipa.or.kr"
+                    className="w-full pl-10 pr-4 py-2.5 rounded-2xl border-2 border-sky-100 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200 text-sm font-cute transition-all"
+                    required
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-cute text-slate-700 mb-1.5 ml-1">
+                  비밀번호
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <input
+                    type={showLoginPassword ? 'text' : 'password'}
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full pl-10 pr-11 py-2.5 rounded-2xl border-2 border-sky-100 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200 text-sm font-cute transition-all"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowLoginPassword(!showLoginPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={loginSubmitting}
+                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 active:scale-95 text-white font-cute text-base font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {loginSubmitting ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span>로그인 확인 중...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="w-5 h-5" />
+                      <span>관리자 대시보드 로그인</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+
+            <div className="mt-4 text-center">
+              <a
+                href="/"
+                className="text-xs text-slate-500 hover:text-slate-700 font-cute underline"
+              >
+                ← 사용자 메인 페이지로 돌아가기
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 pb-20">
       {/* 관리자 헤더 */}
@@ -232,6 +455,27 @@ export default function AdminDashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* 로그인 계정 표시 */}
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-xs text-slate-300">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="font-mono text-slate-200">{user.email}</span>
+            </div>
+
+            {/* 로그아웃 버튼 */}
+            <button
+              onClick={async () => {
+                if (confirm('관리자 계정에서 로그아웃 하시겠습니까?')) {
+                  await logout();
+                  window.location.href = '/';
+                }
+              }}
+              className="px-3 py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-200 border border-rose-700/60 text-xs font-bold flex items-center gap-1.5 transition-all"
+              title="로그아웃"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>로그아웃</span>
+            </button>
+
             <a
               href="/"
               className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-all"
@@ -267,6 +511,101 @@ export default function AdminDashboardPage() {
             한국어촌어항공단 홈페이지의 공개 robots.txt 규칙상 <code>/fipa/bbs/</code>에 대한 크롤러 탐색 제한이 확인되었습니다.
             현재 프로토타입은 서버 측 HTML 파싱 및 정중한 딜레이(Rate Limiting) 방식으로 정상 수집 중이나, 실제 공식 서비스 전환 시에는 <strong>공단 홍보/전산 부서와의 사전 협의 및 공식 OpenAPI 또는 기관 내부 DB 연계</strong>로 전환할 수 있도록 모듈이 추상화되어 있습니다.
           </div>
+        </div>
+
+        {/* Firebase Firestore & Cloud Storage 연동 관제 카드 */}
+        <div className="p-5 rounded-2xl bg-gradient-to-r from-amber-50/90 via-orange-50/60 to-white border-2 border-amber-300 shadow-sm transition-all">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-amber-400 text-amber-950 flex items-center justify-center flex-shrink-0 shadow-sm mt-0.5">
+                <Flame className="w-6 h-6 text-orange-950 fill-amber-300" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2 mb-1">
+                  <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-1.5">
+                    <span>Firebase Firestore & Cloud Storage 클라우드 연동</span>
+                  </h2>
+                  {firebaseStatus?.configured ? (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span>연결됨 ({firebaseStatus.projectId})</span>
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      <span>.env.local 설정 대기 (로컬 DB 동작 중)</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Firebase 설정을 완료하면 공단 소식 및 카드뉴스 이미지가 Google Cloud Firestore/Storage에 실시간 보관되어 서버리스 환경에서도 영구 보존됩니다.
+                  {firebaseStatus?.configured && (
+                    <span className="ml-1 text-emerald-700 font-bold">
+                      (현재 Firestore 등록: {firebaseStatus.firestorePostCount}건)
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+              <button
+                onClick={() => setShowFirebaseGuide(!showFirebaseGuide)}
+                className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold border border-slate-300 shadow-sm transition-all flex items-center gap-1.5"
+              >
+                <Key className="w-3.5 h-3.5 text-amber-600" />
+                <span>{showFirebaseGuide ? '가이드 닫기' : '설정 가이드'}</span>
+              </button>
+
+              <button
+                onClick={handleSyncToFirebase}
+                disabled={isSyncingFirebase || !firebaseStatus?.configured}
+                className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all ${
+                  !firebaseStatus?.configured
+                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
+                    : isSyncingFirebase
+                      ? 'bg-orange-400 text-white cursor-wait'
+                      : 'bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-black active:scale-95'
+                }`}
+                title={!firebaseStatus?.configured ? '.env.local 설정 후 동기화 가능합니다' : '소식을 Firestore로 업로드'}
+              >
+                <UploadCloud className={`w-4 h-4 ${isSyncingFirebase ? 'animate-bounce' : ''}`} />
+                <span>{isSyncingFirebase ? '클라우드 전송 중...' : 'Firestore로 소식 일괄 업로드'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Firebase 설정 가이드 펼침 영역 */}
+          {showFirebaseGuide && (
+            <div className="mt-4 pt-4 border-t border-amber-200 text-xs text-slate-700 space-y-3">
+              <div className="bg-white p-3.5 rounded-xl border border-amber-200">
+                <p className="font-bold text-amber-950 mb-1.5 flex items-center gap-1">
+                  <span>1. <code>.env.local</code> 파일 생성 및 설정값 입력</span>
+                </p>
+                <p className="text-slate-500 mb-2">
+                  Firebase Console &gt; 프로젝트 설정 &gt; 일반 &gt; 내 앱 &gt; 웹 앱(&lt;/&gt;)에서 복사한 값을 프로젝트 루트의 <code>.env.local</code> 파일에 저장하세요:
+                </p>
+                <pre className="p-2.5 bg-slate-900 text-amber-200 rounded-lg overflow-x-auto font-mono text-[11px] leading-relaxed">
+{`NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSy...
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project.appspot.com
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=123456789
+NEXT_PUBLIC_FIREBASE_APP_ID=1:123456789:web:abcdef`}
+                </pre>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-xl border border-amber-200">
+                <p className="font-bold text-amber-950 mb-1">
+                  <span>2. Firebase Console 보안 규칙(Rules) 확인</span>
+                </p>
+                <ul className="list-disc list-inside space-y-1 text-slate-600">
+                  <li><strong>Firestore Database:</strong> 개발/테스트 단계에서는 <code>allow read, write: if true;</code> 또는 인증 규칙을 활성화하세요.</li>
+                  <li><strong>Cloud Storage:</strong> 이미지 업로드를 위해 Storage 규칙에서 읽기/쓰기 권한이 허용되어 있는지 확인하세요.</li>
+                </ul>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 1. 상단 통계 카드 그리드 */}

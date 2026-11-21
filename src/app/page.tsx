@@ -1,13 +1,16 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Volume2, VolumeX, Play, Pause, RotateCcw, Search,
   ExternalLink, Mic, MicOff, Send, QrCode,
   CheckCircle, ChevronLeft, ChevronRight, X, AlertCircle, Sparkles,
-  Heart, Waves, Music, MessageCircle, Star, Compass
+  Heart, Waves, Music, MessageCircle, Star, Compass, ShieldCheck
 } from 'lucide-react';
 import Eodongi from '@/components/Eodongi';
+import { useFirebaseAuth } from '@/lib/useFirebaseAuth';
+import AdminLoginModal from '@/components/AdminLoginModal';
 
 interface Post {
   id: string;
@@ -35,6 +38,10 @@ interface Post {
 }
 
 export default function SeniorHomePage() {
+  const router = useRouter();
+  const { user } = useFirebaseAuth();
+  const [showLoginModal, setShowLoginModal] = useState(false);
+
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedBoard, setSelectedBoard] = useState('ALL');
@@ -283,12 +290,20 @@ export default function SeniorHomePage() {
               <QrCode className="w-4 h-4 text-amber-300" />
               <span className="hidden sm:inline">스마트폰 연결</span>
             </button>
-            <a
-              href="/admin"
-              className="px-3.5 py-1.5 rounded-2xl bg-amber-300 hover:bg-amber-200 text-blue-950 text-xs md:text-sm font-cute shadow-md transition-all hover:scale-105 active:scale-95 border-2 border-white"
+            <button
+              onClick={() => {
+                if (user) {
+                  router.push('/admin');
+                } else {
+                  setShowLoginModal(true);
+                }
+              }}
+              className="px-3.5 py-1.5 rounded-2xl bg-amber-300 hover:bg-amber-200 text-blue-950 text-xs md:text-sm font-cute shadow-md transition-all hover:scale-105 active:scale-95 border-2 border-white flex items-center gap-1.5"
+              title="관리자 전용 대시보드"
             >
-              관리자 모드
-            </a>
+              <ShieldCheck className="w-4 h-4 text-blue-950" />
+              <span>{user ? '관리자 대시보드' : '관리자 모드'}</span>
+            </button>
           </div>
         </div>
 
@@ -877,6 +892,16 @@ export default function SeniorHomePage() {
           </div>
         </div>
       )}
+
+      {/* 10. 관리자 로그인 모달 */}
+      <AdminLoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onSuccess={() => {
+          setShowLoginModal(false);
+          router.push('/admin');
+        }}
+      />
     </div>
   );
 }
