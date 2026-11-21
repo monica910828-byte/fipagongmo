@@ -187,9 +187,91 @@ export default function SeniorHomePage() {
     }
   }
 
-  // TTS 발음 교정 (화면 텍스트는 유지하고 음성 읽기 시 FIPA/FiPA/fipa를 '피파'로 자연스럽게 발음)
+  // TTS 발음 교정 (화면 표기는 유지하고 음성 읽기 시 FIPA -> '피파', 날짜 -> 'YYYY년 M월 D일'로 자연스럽게 발음)
   function normalizeTextForTts(text: string): string {
-    return (text || '').replace(/(^|[^A-Za-z])fipa(?![A-Za-z])/gi, '$1피파');
+    let normalized = text || '';
+
+    // 1. FIPA / FiPA / fipa -> 피파
+    normalized = normalized.replace(/(^|[^A-Za-z])fipa(?![A-Za-z])/gi, '$1피파');
+
+    // 2. 4자리 연도 날짜: 2026.11.18 / 2026. 11.18 / 2026. 11. 18. / 2026-11-18 / 2026/11/18 -> 2026년 11월 18일
+    normalized = normalized.replace(
+      /(^|[^\d])((?:19|20)\d{2})\s*[.\-/]\s*(\d{1,2})\s*[.\-/]\s*(\d{1,2})\.?(?!\d)/g,
+      (match, prefix, year, month, day) => {
+        const m = parseInt(month, 10);
+        const d = parseInt(day, 10);
+        if (m < 1 || m > 12 || d < 1 || d > 31) return match;
+        return `${prefix}${year}년 ${m}월 ${d}일`;
+      }
+    );
+
+    // 3. 2자리 축약 연도 날짜: '26.11.18. / ‘26. 11. 18 -> 2026년 11월 18일
+    normalized = normalized.replace(
+      /['’‘](\d{2})\s*[.\-/]\s*(\d{1,2})\s*[.\-/]\s*(\d{1,2})\.?(?!\d)/g,
+      (match, yy, month, day) => {
+        const m = parseInt(month, 10);
+        const d = parseInt(day, 10);
+        if (m < 1 || m > 12 || d < 1 || d > 31) return match;
+        return `20${yy}년 ${m}월 ${d}일`;
+      }
+    );
+
+    // 4. 월.일 ~ 월.일 범위: 11.18. ~ 11.25. -> 11월 18일 ~ 11월 25일
+    normalized = normalized.replace(
+      /(^|[^\d])(\d{1,2})\s*\.\s*(\d{1,2})\.?\s*~\s*(\d{1,2})\s*\.\s*(\d{1,2})\.?(?!\d)/g,
+      (match, prefix, m1, d1, m2, d2) => {
+        const mm1 = parseInt(m1, 10);
+        const dd1 = parseInt(d1, 10);
+        const mm2 = parseInt(m2, 10);
+        const dd2 = parseInt(d2, 10);
+        if (mm1 < 1 || mm1 > 12 || dd1 < 1 || dd1 > 31 || mm2 < 1 || mm2 > 12 || dd2 < 1 || dd2 > 31) return match;
+        return `${prefix}${mm1}월 ${dd1}일 ~ ${mm2}월 ${dd2}일`;
+      }
+    );
+
+    // 5. 월.일(요일) 형태: 11.18.(수) / 11. 18(수) -> 11월 18일(수)
+    normalized = normalized.replace(
+      /(^|[^\d])(\d{1,2})\s*\.\s*(\d{1,2})\.?\s*(\([월화수목금토일]\))/g,
+      (match, prefix, month, day, weekday) => {
+        const m = parseInt(month, 10);
+        const d = parseInt(day, 10);
+        if (m < 1 || m > 12 || d < 1 || d > 31) return match;
+        return `${prefix}${m}월 ${d}일${weekday}`;
+      }
+    );
+
+    // 6. 날짜 범위 뒤쪽의 월.일: ~ 11.25. / ~ 12. 05 -> ~ 11월 25일
+    normalized = normalized.replace(
+      /(~\s*)(\d{1,2})\s*[.\-/]\s*(\d{1,2})\.?(?!\d)/g,
+      (match, tilde, month, day) => {
+        const m = parseInt(month, 10);
+        const d = parseInt(day, 10);
+        if (m < 1 || m > 12 || d < 1 || d > 31) return match;
+        return `${tilde}${m}월 ${d}일`;
+      }
+    );
+
+    // 7. 4자리 연도.월 형태: 2026. 11. / 2026.11 -> 2026년 11월
+    normalized = normalized.replace(
+      /(^|[^\d])((?:19|20)\d{2})\s*[.\-/]\s*(\d{1,2})\.?(?![\d.\-/])/g,
+      (match, prefix, year, month) => {
+        const m = parseInt(month, 10);
+        if (m < 1 || m > 12) return match;
+        return `${prefix}${year}년 ${m}월`;
+      }
+    );
+
+    // 8. 날짜 사이 물결표(~) 자연스럽게 읽기 (중복 '까지' 방지)
+    normalized = normalized.replace(
+      /(\d{1,2}일(?:\([월화수목금토일]\))?)\s*~\s*((?:\d{4}년\s*)?\d{1,2}월\s*\d{1,2}일(?:\([월화수목금토일]\))?)(?=\s*까지)/g,
+      '$1부터 $2'
+    );
+    normalized = normalized.replace(
+      /(\d{1,2}일(?:\([월화수목금토일]\))?)\s*~\s*((?:\d{4}년\s*)?\d{1,2}월\s*\d{1,2}일(?:\([월화수목금토일]\))?)(?!\s*까지)/g,
+      '$1부터 $2까지'
+    );
+
+    return normalized;
   }
 
   // TTS 음성 재생 함수 (단일)
