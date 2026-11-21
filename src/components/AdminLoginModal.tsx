@@ -72,23 +72,23 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
       <div 
-        className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border-4 border-sky-200 overflow-hidden"
+        className="relative w-full sm:max-w-md max-h-[92dvh] overflow-y-auto bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl border-t-4 sm:border-4 border-sky-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 상단 귀여운 헤더 */}
-        <div className="bg-gradient-to-r from-sky-400 via-sky-500 to-blue-600 px-6 py-5 text-white flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-md p-1">
-              <Eodongi size={40} pose="happy" />
+        <div className="bg-gradient-to-r from-sky-400 via-sky-500 to-blue-600 px-5 sm:px-6 py-4 sm:py-5 text-white flex items-center justify-between gap-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 bg-white rounded-2xl flex items-center justify-center shadow-md p-1 flex-shrink-0">
+              <Eodongi size={38} pose="happy" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-1.5 text-xs font-cute text-sky-100">
-                <ShieldCheck className="w-3.5 h-3.5 text-amber-300" />
-                <span>한국어촌어항공단 관리 시스템</span>
+                <ShieldCheck className="w-3.5 h-3.5 text-amber-300 flex-shrink-0" />
+                <span className="truncate">한국어촌어항공단 관리 시스템</span>
               </div>
-              <h2 className="text-xl font-cute font-bold tracking-wide text-white drop-shadow-sm">
+              <h2 className="text-lg sm:text-xl font-cute font-bold tracking-wide text-white drop-shadow-sm">
                 관리자 모드 로그인
               </h2>
             </div>
@@ -96,22 +96,23 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
 
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition-colors"
+            className="min-w-[44px] min-h-[44px] rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition-colors flex-shrink-0"
             title="닫기"
+            aria-label="닫기"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* 바디 폼 */}
-        <div className="p-6">
-          <p className="text-sm text-slate-600 font-cute mb-5 text-center">
+        <div className="p-5 sm:p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <p className="text-sm text-slate-600 font-cute mb-5 text-center leading-relaxed break-keep">
             관리자 전용 대시보드 접근을 위해<br />
             등록된 <span className="text-sky-600 font-bold">이메일과 비밀번호</span>를 입력해 주세요.
           </p>
 
           {errorMessage && (
-            <div className="mb-4 p-3 rounded-2xl bg-rose-50 border-2 border-rose-200 text-rose-700 text-xs md:text-sm font-cute flex items-center gap-2">
+            <div className="mb-4 p-3 rounded-2xl bg-rose-50 border-2 border-rose-200 text-rose-700 text-sm font-cute flex items-center gap-2 break-keep">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
               <span>{errorMessage}</span>
             </div>
@@ -120,7 +121,7 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* 이메일 입력 */}
             <div>
-              <label className="block text-xs font-cute text-slate-700 mb-1.5 ml-1">
+              <label className="block text-sm font-cute text-slate-700 mb-1.5 ml-1">
                 관리자 이메일 계정
               </label>
               <div className="relative">
@@ -132,7 +133,7 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="admin@fipa.or.kr"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-2xl border-2 border-sky-100 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200 text-sm font-cute transition-all"
+                  className="w-full pl-10 pr-4 py-3 rounded-2xl border-2 border-sky-100 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200 text-base sm:text-sm font-cute transition-all min-h-[46px]"
                   required
                   autoFocus
                 />
@@ -141,7 +142,7 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
 
             {/* 비밀번호 입력 */}
             <div>
-              <label className="block text-xs font-cute text-slate-700 mb-1.5 ml-1">
+              <label className="block text-sm font-cute text-slate-700 mb-1.5 ml-1">
                 비밀번호
               </label>
               <div className="relative">
@@ -153,15 +154,16 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-10 pr-11 py-2.5 rounded-2xl border-2 border-sky-100 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200 text-sm font-cute transition-all"
+                  className="w-full pl-10 pr-12 py-3 rounded-2xl border-2 border-sky-100 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200 text-base sm:text-sm font-cute transition-all min-h-[46px]"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
+                  className="absolute inset-y-0 right-0 px-3 min-w-[44px] flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
+                  aria-label={showPassword ? '비밀번호 숨기기' : '비밀번호 보기'}
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
             </div>
@@ -171,7 +173,7 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 active:scale-95 text-white font-cute text-base font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full min-h-[48px] py-3 rounded-2xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 active:scale-95 text-white font-cute text-base font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 {loading ? (
                   <>
@@ -193,7 +195,7 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
             <button
               type="button"
               onClick={onClose}
-              className="text-xs text-slate-500 hover:text-slate-700 font-cute underline"
+              className="min-h-[44px] px-4 text-sm text-slate-500 hover:text-slate-700 font-cute underline"
             >
               홈 화면으로 돌아가기
             </button>

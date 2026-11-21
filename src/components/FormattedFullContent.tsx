@@ -179,7 +179,7 @@ export default function FormattedFullContent({
   };
 
   return (
-    <div className={`space-y-3 font-cute ${textClass}`}>
+    <div className={`space-y-3 font-cute break-keep [overflow-wrap:anywhere] ${textClass}`}>
       {blocks.map((block, idx) => {
         switch (block.type) {
           case 'header':
@@ -189,14 +189,14 @@ export default function FormattedFullContent({
                 className="mt-6 mb-3 pt-3 border-t-2 border-sky-100 first:mt-0 first:pt-0 first:border-0"
               >
                 <div
-                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-2xl shadow-sm text-base md:text-lg font-bold ${
+                  className={`inline-flex flex-wrap items-center gap-1.5 sm:gap-2 px-3 sm:px-3.5 py-1.5 rounded-2xl shadow-sm text-base md:text-lg font-bold max-w-full ${
                     highContrast
                       ? 'bg-yellow-400 text-black'
                       : 'bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 text-white'
                   }`}
                 >
-                  <span className="text-amber-200">📌</span>
-                  <span>{block.text}</span>
+                  <span className="text-amber-200 flex-shrink-0">📌</span>
+                  <span className="break-keep [overflow-wrap:anywhere]">{block.text}</span>
                 </div>
               </div>
             );
@@ -205,7 +205,7 @@ export default function FormattedFullContent({
             return (
               <div
                 key={idx}
-                className={`my-3 p-3 text-center rounded-2xl border font-bold text-base md:text-lg ${
+                className={`my-3 p-3 text-center rounded-2xl border font-bold text-base md:text-lg break-keep [overflow-wrap:anywhere] ${
                   highContrast
                     ? 'bg-zinc-900 border-yellow-400 text-yellow-300'
                     : 'bg-gradient-to-r from-sky-50 via-blue-50 to-indigo-50 border-sky-200 text-blue-950'
@@ -224,17 +224,17 @@ export default function FormattedFullContent({
             return (
               <div
                 key={idx}
-                className={`p-3 md:p-3.5 rounded-2xl border flex items-start gap-2.5 transition-colors ${
+                className={`p-3 md:p-3.5 rounded-2xl border flex items-start gap-2 sm:gap-2.5 transition-colors ${
                   highContrast
                     ? 'bg-zinc-900 border-yellow-400/80 text-yellow-100'
                     : 'bg-sky-50/70 border-sky-200/80 hover:bg-sky-50 text-slate-800'
                 }`}
               >
                 <span className="text-sky-600 font-bold mt-0.5 text-base flex-shrink-0">🔹</span>
-                <div className="flex-1 leading-relaxed break-words">
+                <div className="flex-1 min-w-0 leading-relaxed break-keep [overflow-wrap:anywhere]">
                   {tag && (
                     <strong
-                      className={`mr-2 font-bold px-2 py-0.5 rounded-lg text-sm md:text-base inline-block ${
+                      className={`mr-2 mb-1 font-bold px-2 py-0.5 rounded-lg text-sm md:text-base inline-block ${
                         highContrast
                           ? 'bg-yellow-400 text-black'
                           : 'bg-sky-200/90 text-blue-950 border border-sky-300'
@@ -253,14 +253,14 @@ export default function FormattedFullContent({
             return (
               <div
                 key={idx}
-                className={`pl-3 pr-2 py-1.5 flex items-start gap-2 rounded-xl transition-colors ${
+                className={`pl-2.5 sm:pl-3 pr-2 py-1.5 flex items-start gap-2 rounded-xl transition-colors ${
                   highContrast
                     ? 'text-yellow-200 hover:bg-zinc-900'
                     : 'text-slate-700 hover:bg-slate-50'
                 }`}
               >
-                <span className="text-amber-500 font-bold mt-1 text-sm">•</span>
-                <div className="flex-1 leading-relaxed break-words">
+                <span className="text-amber-500 font-bold mt-1 text-sm flex-shrink-0">•</span>
+                <div className="flex-1 min-w-0 leading-relaxed break-keep [overflow-wrap:anywhere]">
                   {renderInlineText(block.text)}
                 </div>
               </div>
@@ -277,7 +277,7 @@ export default function FormattedFullContent({
                 }`}
               >
                 <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                <div className="flex-1 text-sm md:text-base leading-relaxed break-words">
+                <div className="flex-1 min-w-0 text-sm md:text-base leading-relaxed break-keep [overflow-wrap:anywhere]">
                   <strong className="text-amber-900 mr-1.5 font-bold">[안내/유의사항]</strong>
                   {renderInlineText(block.text)}
                 </div>
@@ -289,7 +289,7 @@ export default function FormattedFullContent({
             return (
               <p
                 key={idx}
-                className={`leading-relaxed break-words my-2.5 ${
+                className={`leading-relaxed break-keep [overflow-wrap:anywhere] my-2.5 ${
                   highContrast ? 'text-yellow-100' : 'text-slate-800'
                 }`}
               >

@@ -10,6 +10,8 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 5,
+  viewportFit: 'cover',
+  interactiveWidget: 'resizes-content',
 };
 
 export default function RootLayout({
@@ -24,7 +26,7 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Jua&family=Gaegu:wght@400;700&display=swap" rel="stylesheet" />
       </head>
-      <body className="bg-[#F3F9FF] text-slate-900 min-h-screen antialiased selection:bg-amber-200 font-cute">
+      <body className="bg-[#F3F9FF] text-slate-900 min-h-screen antialiased selection:bg-amber-200 font-cute overflow-x-clip">
         {children}
       </body>
     </html>
