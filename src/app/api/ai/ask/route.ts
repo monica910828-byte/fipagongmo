@@ -12,9 +12,12 @@ export const maxDuration = 30;
 
 interface OpenAiRuntimeConfig {
   apiKey: string;
+  hasOpenAiApiKey: boolean;
+  isOpenAiApiKeyEmpty: boolean;
   apiKeyConfigured: boolean;
+  hasOpenAiModel: boolean;
   modelName: string;
-  vercelEnv: string;
+  vercelEnv: 'production' | 'preview' | 'development';
   nodeEnv: string;
   isProductionEnv: boolean;
   demoModeEnvConfigured: boolean;
@@ -23,40 +26,69 @@ interface OpenAiRuntimeConfig {
 }
 
 /**
- * 서버 전용 OpenAI 환경변수 및 실행 환경 설정을 안전하게 조회합니다.
- * - process.env.OPENAI_API_KEY만 사용합니다 (VITE_ / NEXT_PUBLIC_ 대체 경로 미사용).
+ * 서버 전용 OpenAI 환경변수 및 실행 환경 설정을 런타임 시점에 동적으로 조회합니다.
+ * - process.env['OPENAI_API_KEY']만 사용합니다 (VITE_ / NEXT_PUBLIC_ 대체 경로 미사용).
  * - 운영 환경(Production)에서는 DEMO_MODE=true가 설정되어 있어도 실제 OpenAI API를 호출합니다.
  */
 function getOpenAiRuntimeConfig(): OpenAiRuntimeConfig {
-  const rawApiKey = process.env.OPENAI_API_KEY;
-  const apiKey = typeof rawApiKey === 'string' ? rawApiKey.trim() : '';
-  const apiKeyConfigured = apiKey.length > 0;
+  const rawApiKey = process.env['OPENAI_API_KEY'];
+  const hasOpenAiApiKey = typeof rawApiKey === 'string';
+  const apiKey = hasOpenAiApiKey ? rawApiKey.trim() : '';
+  const isOpenAiApiKeyEmpty = apiKey.length === 0;
+  const apiKeyConfigured = hasOpenAiApiKey && !isOpenAiApiKeyEmpty;
 
-  const modelName = (process.env.OPENAI_MODEL || '').trim() || 'gpt-4o';
+  const rawModel = process.env['OPENAI_MODEL'];
+  const hasOpenAiModel = typeof rawModel === 'string' && rawModel.trim().length > 0;
+  const modelName = hasOpenAiModel ? rawModel.trim() : 'gpt-4o-mini';
 
-  const vercelEnvRaw = process.env.VERCEL_ENV || null; // 'production' | 'preview' | 'development' | null
-  const nodeEnv = process.env.NODE_ENV || 'unknown';
-  const isProductionEnv = vercelEnvRaw === 'production' || (nodeEnv === 'production' && !vercelEnvRaw);
+  const vercelEnvRaw = process.env['VERCEL_ENV'];
+  const nodeEnv = process.env['NODE_ENV'] || 'development';
+  const vercelEnv: 'production' | 'preview' | 'development' =
+    vercelEnvRaw === 'production' || vercelEnvRaw === 'preview' || vercelEnvRaw === 'development'
+      ? vercelEnvRaw
+      : nodeEnv === 'production'
+      ? 'production'
+      : 'development';
 
-  const demoModeEnvConfigured = (process.env.DEMO_MODE || '').trim().toLowerCase() === 'true';
-  // 운영 환경에서는 DEMO_MODE=true로 인한 가상 응답 차단을 방지하고 실제 OpenAI API를 우선 호출
+  const isProductionEnv = vercelEnv === 'production';
+
+  const demoModeEnvConfigured = (process.env['DEMO_MODE'] || '').trim().toLowerCase() === 'true';
+  // 운영 환경(Production)에서는 DEMO_MODE=true로 인한 가상 응답 차단을 방지하고 실제 OpenAI API를 호출
   const isDemoModeForced = !isProductionEnv && demoModeEnvConfigured;
 
-  const commitSha = process.env.VERCEL_GIT_COMMIT_SHA
-    ? process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 7)
+  const commitShaRaw = process.env['VERCEL_GIT_COMMIT_SHA'];
+  const commitSha = typeof commitShaRaw === 'string' && commitShaRaw.length > 0
+    ? commitShaRaw.slice(0, 7)
     : null;
 
   return {
     apiKey,
+    hasOpenAiApiKey,
+    isOpenAiApiKeyEmpty,
     apiKeyConfigured,
+    hasOpenAiModel,
     modelName,
-    vercelEnv: vercelEnvRaw || 'local',
+    vercelEnv,
     nodeEnv,
     isProductionEnv,
     demoModeEnvConfigured,
     isDemoModeForced,
     commitSha,
   };
+}
+
+/**
+ * 보안 안전한 서버 로그 진단 출력
+ * - API 키 원문/일부 문자열 및 전체 환경변수 목록은 절대 출력하지 않습니다.
+ */
+function logSafeEnvDiagnostics(method: 'GET' | 'POST', cfg: OpenAiRuntimeConfig) {
+  console.info(`[API ${method} /api/ai/ask] Runtime env diagnostics:`, {
+    vercelEnv: cfg.vercelEnv,
+    hasOpenAiApiKey: cfg.hasOpenAiApiKey,
+    isOpenAiApiKeyEmpty: cfg.isOpenAiApiKeyEmpty,
+    hasOpenAiModel: cfg.hasOpenAiModel,
+    isDemoModeActive: cfg.isDemoModeForced,
+  });
 }
 
 function classifyOpenAiError(err: any): {
@@ -136,22 +168,29 @@ function classifyOpenAiError(err: any): {
 }
 
 /**
- * Vercel 서버 함수 환경변수 인식 상태 진단 엔드포인트 (GET /api/ai/ask)
- * - API 키 값이나 일부 문자열은 절대 출력하지 않고 Boolean(apiKeyConfigured)만 반환합니다.
+ * 인증된 관리자 전용 환경변수 진단 엔드포인트 (GET /api/ai/ask)
+ * - 비인증 사용자에게는 진단 정보를 제공하지 않고 401을 반환합니다.
+ * - API 키 원문이나 일부 문자열은 절대 반환하거나 로그에 출력하지 않습니다.
  */
-export async function GET() {
-  const cfg = getOpenAiRuntimeConfig();
+export async function GET(req: NextRequest) {
+  const authResult = await verifyFirebaseToken(req);
+  if (!authResult.isValid) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: '인증된 관리자만 환경변수 진단 정보를 조회할 수 있습니다.',
+      },
+      {
+        status: 401,
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+        },
+      }
+    );
+  }
 
-  console.info('[API GET /api/ai/ask] Runtime env check:', {
-    apiKeyConfigured: cfg.apiKeyConfigured,
-    modelConfigured: cfg.modelName,
-    isDemoModeForced: cfg.isDemoModeForced,
-    demoModeEnvConfigured: cfg.demoModeEnvConfigured,
-    isProductionEnv: cfg.isProductionEnv,
-    vercelEnv: cfg.vercelEnv,
-    nodeEnv: cfg.nodeEnv,
-    commitSha: cfg.commitSha,
-  });
+  const cfg = getOpenAiRuntimeConfig();
+  logSafeEnvDiagnostics('GET', cfg);
 
   const status = cfg.isDemoModeForced
     ? 'DEMO_MODE_ACTIVE'
@@ -164,21 +203,31 @@ export async function GET() {
       ? '서버 환경변수 OPENAI_API_KEY가 정상적으로 인식되었습니다.'
       : status === 'DEMO_MODE_ACTIVE'
       ? '개발 환경에서 DEMO_MODE=true 설정이 활성화되어 있습니다.'
-      : '서버 환경변수 OPENAI_API_KEY를 읽지 못했습니다. Vercel 환경변수(Production/Preview 범위) 등록 및 재배포 상태를 확인해 주세요.';
+      : cfg.hasOpenAiApiKey && cfg.isOpenAiApiKeyEmpty
+      ? '서버 환경변수 OPENAI_API_KEY는 존재하지만 값이 비어 있습니다. Vercel 환경변수 값을 확인해 주세요.'
+      : '서버 환경변수 OPENAI_API_KEY를 읽지 못했습니다. Vercel 프로젝트 환경변수(Production/Preview 적용 범위) 등록 및 재배포 상태를 확인해 주세요.';
 
   return NextResponse.json(
     {
       success: true,
       diagnostics: {
         status,
-        failureCategory: status === 'MISSING_API_KEY' ? 'CONFIG_ERROR' : status === 'DEMO_MODE_ACTIVE' ? 'DEMO_MODE' : null,
+        failureCategory:
+          status === 'MISSING_API_KEY'
+            ? 'CONFIG_ERROR'
+            : status === 'DEMO_MODE_ACTIVE'
+            ? 'DEMO_MODE'
+            : null,
+        vercelEnv: cfg.vercelEnv,
+        hasOpenAiApiKey: cfg.hasOpenAiApiKey,
+        isOpenAiApiKeyEmpty: cfg.isOpenAiApiKeyEmpty,
         apiKeyConfigured: cfg.apiKeyConfigured,
+        hasOpenAiModel: cfg.hasOpenAiModel,
         modelConfigured: cfg.modelName,
+        isDemoModeActive: cfg.isDemoModeForced,
         isDemoModeForced: cfg.isDemoModeForced,
         demoModeEnvConfigured: cfg.demoModeEnvConfigured,
         isProductionEnv: cfg.isProductionEnv,
-        vercelEnv: cfg.vercelEnv,
-        nodeEnv: cfg.nodeEnv,
         runtime: 'nodejs',
         commitSha: cfg.commitSha,
         message,
@@ -223,20 +272,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. 서버 전용 환경변수 확인 (process.env.OPENAI_API_KEY만 사용)
+    // 2. 서버 전용 환경변수 확인 (process.env['OPENAI_API_KEY']만 사용)
     const cfg = getOpenAiRuntimeConfig();
 
-    // 서버 실행 시 API 키 존재 여부를 Boolean으로만 기록하는 안전한 진단 로그 (키 원문 절대 출력 금지)
-    console.info('[API POST /api/ai/ask] Runtime env check:', {
-      apiKeyConfigured: cfg.apiKeyConfigured,
-      modelConfigured: cfg.modelName,
-      isDemoModeForced: cfg.isDemoModeForced,
-      demoModeEnvConfigured: cfg.demoModeEnvConfigured,
-      isProductionEnv: cfg.isProductionEnv,
-      vercelEnv: cfg.vercelEnv,
-      nodeEnv: cfg.nodeEnv,
-      commitSha: cfg.commitSha,
-    });
+    // 서버 로그에 보안 안전한 5개 진단 항목만 기록 (API 키 원문/일부/전체 목록 출력 금지)
+    logSafeEnvDiagnostics('POST', cfg);
 
     // 3. 모든 게시글 로드 (Prisma -> Fallback)
     let allPosts: any[] = [];
@@ -311,14 +351,17 @@ export async function POST(req: NextRequest) {
     const diagnosticInfo: Record<string, any> = {
       status: 'PENDING',
       failureCategory: null,
+      vercelEnv: cfg.vercelEnv,
+      hasOpenAiApiKey: cfg.hasOpenAiApiKey,
+      isOpenAiApiKeyEmpty: cfg.isOpenAiApiKeyEmpty,
       apiKeyConfigured: cfg.apiKeyConfigured,
       openAiAttempted: false,
+      hasOpenAiModel: cfg.hasOpenAiModel,
       modelConfigured: cfg.modelName,
+      isDemoModeActive: cfg.isDemoModeForced,
       isDemoModeForced: cfg.isDemoModeForced,
       demoModeEnvConfigured: cfg.demoModeEnvConfigured,
       isProductionEnv: cfg.isProductionEnv,
-      vercelEnv: cfg.vercelEnv,
-      nodeEnv: cfg.nodeEnv,
       runtime: 'nodejs',
       commitSha: cfg.commitSha,
       authenticated: authResult.isValid,
@@ -331,11 +374,12 @@ export async function POST(req: NextRequest) {
       diagnosticInfo.message =
         '개발 환경의 DEMO_MODE=true 설정으로 인해 가상 데모 응답으로 제공되었습니다. [상태: DEMO_MODE_ACTIVE]';
     } else if (!cfg.apiKeyConfigured) {
-      // 서버 환경변수 process.env.OPENAI_API_KEY가 비어 있거나 미등록된 경우 (API 호출 시도 전 차단)
+      // 서버 환경변수 process.env['OPENAI_API_KEY']가 비어 있거나 미등록된 경우 (API 호출 시도 전 차단)
       diagnosticInfo.status = 'MISSING_API_KEY';
       diagnosticInfo.failureCategory = 'CONFIG_ERROR';
-      diagnosticInfo.message =
-        '서버 환경변수 OPENAI_API_KEY를 읽지 못했습니다. Vercel 프로젝트 환경변수(Production/Preview 적용 범위) 등록 및 재배포 상태를 확인해 주세요. [상태: MISSING_API_KEY]';
+      diagnosticInfo.message = cfg.hasOpenAiApiKey && cfg.isOpenAiApiKeyEmpty
+        ? '서버 환경변수 OPENAI_API_KEY는 존재하지만 값이 비어 있습니다. Vercel 환경변수 값을 확인해 주세요. [상태: MISSING_API_KEY]'
+        : '서버 환경변수 OPENAI_API_KEY를 읽지 못했습니다. Vercel 프로젝트 환경변수(Production/Preview 적용 범위) 등록 및 재배포 상태를 확인해 주세요. [상태: MISSING_API_KEY]';
     } else {
       // 실제 OpenAI 연동 모드 실행 (API 키 존재 확인됨)
       diagnosticInfo.openAiAttempted = true;
@@ -382,7 +426,7 @@ export async function POST(req: NextRequest) {
           if (!isModelIssue) {
             throw mErr;
           }
-          const fallbackModel = cfg.modelName === 'gpt-4o' ? 'gpt-4o-mini' : 'gpt-4o';
+          const fallbackModel = cfg.modelName === 'gpt-4o-mini' ? 'gpt-4o' : 'gpt-4o-mini';
           response = await openai.chat.completions.create({
             model: fallbackModel,
             messages: [
@@ -414,12 +458,13 @@ export async function POST(req: NextRequest) {
         const classified = classifyOpenAiError(err);
 
         console.error('[API POST /api/ai/ask] OpenAI API call failed:', {
-          apiKeyConfigured: cfg.apiKeyConfigured,
+          vercelEnv: cfg.vercelEnv,
+          hasOpenAiApiKey: cfg.hasOpenAiApiKey,
+          isOpenAiApiKeyEmpty: cfg.isOpenAiApiKeyEmpty,
           status: classified.status,
           httpStatus: classified.httpStatus,
           errorCode: classified.errorCode,
-          modelConfigured: cfg.modelName,
-          vercelEnv: cfg.vercelEnv,
+          hasOpenAiModel: cfg.hasOpenAiModel,
         });
 
         diagnosticInfo.status = classified.status;
@@ -458,6 +503,7 @@ export async function POST(req: NextRequest) {
       await saveQnaToFirestore(trimmedQuestion, answer, relevantPost?.id, relevantPost?.title);
     } catch {}
 
+    // 보안 원칙: 내부 환경변수/실행환경 진단 정보는 Firebase 인증된 사용자(관리자)에게만 반환
     return NextResponse.json(
       {
         success: true,
@@ -465,7 +511,7 @@ export async function POST(req: NextRequest) {
         voiceScript,
         isDemo,
         relevantPost: relevantPost ? { id: relevantPost.id, title: relevantPost.title } : null,
-        diagnostics: diagnosticInfo,
+        ...(authResult.isValid ? { diagnostics: diagnosticInfo } : {}),
       },
       {
         headers: {

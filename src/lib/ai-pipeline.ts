@@ -152,27 +152,36 @@ export async function transformContentWithOpenAI(
   boardType: string,
   cardImagesCount: number = 0
 ): Promise<AiTransformResult> {
-  // 서버 전용 환경변수 process.env.OPENAI_API_KEY만 사용 (VITE_ / NEXT_PUBLIC_ 대체 경로 제거)
-  const rawApiKey = process.env.OPENAI_API_KEY;
-  const apiKey = typeof rawApiKey === 'string' ? rawApiKey.trim() : '';
-  const apiKeyConfigured = apiKey.length > 0;
-  const modelName = (process.env.OPENAI_MODEL || '').trim() || 'gpt-4o';
+  // 서버 전용 환경변수 process.env['OPENAI_API_KEY']만 사용 (VITE_ / NEXT_PUBLIC_ 대체 경로 제거)
+  const rawApiKey = process.env['OPENAI_API_KEY'];
+  const hasOpenAiApiKey = typeof rawApiKey === 'string';
+  const apiKey = hasOpenAiApiKey ? rawApiKey.trim() : '';
+  const isOpenAiApiKeyEmpty = apiKey.length === 0;
+  const apiKeyConfigured = hasOpenAiApiKey && !isOpenAiApiKeyEmpty;
 
-  const vercelEnvRaw = process.env.VERCEL_ENV || null;
-  const nodeEnv = process.env.NODE_ENV || 'unknown';
-  const isProductionEnv = vercelEnvRaw === 'production' || (nodeEnv === 'production' && !vercelEnvRaw);
-  const demoModeEnvConfigured = (process.env.DEMO_MODE || '').trim().toLowerCase() === 'true';
+  const rawModel = process.env['OPENAI_MODEL'];
+  const hasOpenAiModel = typeof rawModel === 'string' && rawModel.trim().length > 0;
+  const modelName = hasOpenAiModel ? rawModel.trim() : 'gpt-4o-mini';
+
+  const vercelEnvRaw = process.env['VERCEL_ENV'];
+  const nodeEnv = process.env['NODE_ENV'] || 'development';
+  const vercelEnv: 'production' | 'preview' | 'development' =
+    vercelEnvRaw === 'production' || vercelEnvRaw === 'preview' || vercelEnvRaw === 'development'
+      ? vercelEnvRaw
+      : nodeEnv === 'production'
+      ? 'production'
+      : 'development';
+  const isProductionEnv = vercelEnv === 'production';
+  const demoModeEnvConfigured = (process.env['DEMO_MODE'] || '').trim().toLowerCase() === 'true';
   // 운영 환경(Production)에서는 DEMO_MODE=true가 설정되어 있어도 실제 OpenAI API를 호출
   const isDemoModeForced = !isProductionEnv && demoModeEnvConfigured;
 
-  console.info('[AI Pipeline] Runtime env check:', {
-    apiKeyConfigured,
-    modelConfigured: modelName,
-    isDemoModeForced,
-    demoModeEnvConfigured,
-    isProductionEnv,
-    vercelEnv: vercelEnvRaw || 'local',
-    nodeEnv,
+  console.info('[AI Pipeline] Runtime env diagnostics:', {
+    vercelEnv,
+    hasOpenAiApiKey,
+    isOpenAiApiKeyEmpty,
+    hasOpenAiModel,
+    isDemoModeActive: isDemoModeForced,
   });
 
   if (isDemoModeForced) {
@@ -247,7 +256,7 @@ ${rawText.slice(0, 4000)}
       const isModelIssue =
         mErr?.status === 404 || mErr?.status === 400 || mErr?.code === 'model_not_found';
       if (isModelIssue) {
-        usedModel = modelName === 'gpt-4o' ? 'gpt-4o-mini' : 'gpt-4o';
+        usedModel = modelName === 'gpt-4o-mini' ? 'gpt-4o' : 'gpt-4o-mini';
         response = await openai.chat.completions.create({
           model: usedModel,
           messages: [
@@ -301,12 +310,13 @@ ${rawText.slice(0, 4000)}
         : 'OPENAI_API_FAILED';
 
     console.error('[AI Pipeline] OpenAI API call failed:', {
-      apiKeyConfigured: true,
+      vercelEnv,
+      hasOpenAiApiKey: true,
+      isOpenAiApiKeyEmpty: false,
+      hasOpenAiModel,
       status: failureStatus,
       httpStatus,
       errorCode: error?.code ?? error?.type ?? null,
-      modelConfigured: modelName,
-      vercelEnv: vercelEnvRaw || 'local',
     });
 
     // 오류 시 안전하게 규칙 엔진 결과로 폴백하되 키 부재가 아닌 API 호출 실패임을 명시
