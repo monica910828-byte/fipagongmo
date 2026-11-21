@@ -5,6 +5,7 @@ import {
   RefreshCw, CheckCircle2, AlertTriangle, Clock, Server, FileText,
   ShieldAlert, Settings, ExternalLink, Eye, EyeOff, Play, Info, Check, X
 } from 'lucide-react';
+import Eodongi from '@/components/Eodongi';
 
 interface BoardStat {
   boardType: string;
@@ -212,13 +213,18 @@ export default function AdminDashboardPage() {
       <header className="bg-slate-900 text-white sticky top-0 z-30 shadow-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className="bg-yellow-400 text-blue-950 font-black px-2.5 py-1 rounded text-sm">
-              FiPA ADMIN
-            </span>
+            <div className="w-10 h-10 rounded-xl bg-white p-0.5 shadow-sm flex items-center justify-center flex-shrink-0">
+              <Eodongi pose="happy" size={36} />
+            </div>
             <div>
-              <h1 className="font-extrabold text-xl tracking-tight">
-                들려드림 자동 연계 통합 관리자 대시보드
-              </h1>
+              <div className="flex items-center gap-2">
+                <span className="bg-yellow-400 text-blue-950 font-black px-2 py-0.5 rounded text-xs">
+                  FiPA ADMIN
+                </span>
+                <h1 className="font-extrabold text-lg sm:text-xl tracking-tight">
+                  들려드림 자동 연계 통합 관리자 대시보드
+                </h1>
+              </div>
               <p className="text-xs text-slate-400">
                 한국어촌어항공단 공식 게시판 크롤링 및 AI 변환 파이프라인 관제
               </p>
