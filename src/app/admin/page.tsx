@@ -465,14 +465,14 @@ export default function AdminDashboardPage() {
               <Eodongi pose="happy" size={36} />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <a href="/" className="flex items-center gap-2 hover:opacity-90 transition-opacity" title="메인 페이지로 돌아가기">
                 <span className="bg-yellow-400 text-blue-950 font-black px-2 py-0.5 rounded text-xs">
                   FiPA ADMIN
                 </span>
                 <h1 className="font-extrabold text-lg sm:text-xl tracking-tight">
                   들려드림 자동 연계 통합 관리자 대시보드
                 </h1>
-              </div>
+              </a>
               <p className="text-xs text-slate-400">
                 한국어촌어항공단 공식 게시판 크롤링 및 AI 변환 파이프라인 관제
               </p>

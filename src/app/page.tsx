@@ -154,6 +154,28 @@ export default function SeniorHomePage() {
     }
   };
 
+  // 상단 'FiPA 들려드림' 타이틀 클릭 시 메인 화면 초기 상태 및 최상단으로 복귀
+  const resetToHome = () => {
+    stopVoice();
+    stopPlaylist();
+    stopVoiceRecognition();
+    setActivePost(null);
+    setAskModalPost(null);
+    setShowGeneralAskModal(false);
+    setShowQrModal(false);
+    setShowLoginModal(false);
+    setSelectedBoard('ALL');
+    setSearchQuery('');
+    setSelectedDate('ALL');
+    setCustomDatePicker('');
+    setUserQuestion('');
+    setAiAnswer(null);
+    setCurrentCardIndex(0);
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       synthRef.current = window.speechSynthesis;
@@ -796,9 +818,17 @@ export default function SeniorHomePage() {
 
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="font-cute text-xl sm:text-2xl md:text-3xl tracking-wide flex items-center text-white drop-shadow-sm whitespace-nowrap">
-                  <span>FiPA 들려드림</span>
-                </h1>
+                <button
+                  type="button"
+                  onClick={resetToHome}
+                  className="text-left cursor-pointer hover:opacity-90 active:scale-95 transition-all rounded-xl focus-visible:outline-none"
+                  title="메인 페이지 처음으로 돌아가기"
+                  aria-label="FiPA 들려드림 처음 화면으로 돌아가기"
+                >
+                  <h1 className="font-cute text-xl sm:text-2xl md:text-3xl tracking-wide flex items-center text-white drop-shadow-sm whitespace-nowrap">
+                    <span>FiPA 들려드림</span>
+                  </h1>
+                </button>
                 <span className="hidden sm:inline-flex text-xs bg-amber-300 text-blue-950 font-cute px-2.5 py-0.5 rounded-full shadow-sm items-center gap-1 animate-cute-wiggle whitespace-nowrap">
                   <span>어동이와 바다 여행</span> 🐬
                 </span>
