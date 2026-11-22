@@ -209,7 +209,7 @@ export default function SeniorHomePage() {
       const res = await fetch('/api/posts');
       const data = await res.json();
       if (data.success) {
-        setPosts(data.posts);
+        setPosts((data.posts || []).filter((p: Post) => p.boardType !== 'CARD_NEWS'));
       }
     } catch (e) {
       console.error('게시물 조회 오류:', e);
@@ -982,7 +982,6 @@ export default function SeniorHomePage() {
           {[
             { id: 'ALL', name: '전체 소식', emoji: '🌊', color: 'from-sky-400 to-blue-500' },
             { id: 'PRESS', name: '보도자료', emoji: '📰', color: 'from-blue-400 to-indigo-500' },
-            { id: 'CARD_NEWS', name: '카드뉴스', emoji: '🎨', color: 'from-purple-400 to-pink-500' },
             { id: 'NOTICE', name: '공지사항', emoji: '📢', color: 'from-emerald-400 to-teal-500' },
             { id: 'RECRUIT', name: '공고·공모', emoji: '📑', color: 'from-amber-400 to-orange-500' },
           ].map(tab => {
@@ -2015,7 +2014,7 @@ export default function SeniorHomePage() {
                     🌊 공단 홈페이지 전체 통합 검색 AI
                   </span>
                   <span className="text-xs opacity-80 font-cute">
-                    보도자료 · 카드뉴스 · 공지사항 · 공고·공모 · 주요 사업 전체 연동
+                    보도자료 · 공지사항 · 공고·공모 · 주요 사업 전체 연동
                   </span>
                 </div>
                 <p className="font-cute text-sm sm:text-base leading-relaxed break-keep">

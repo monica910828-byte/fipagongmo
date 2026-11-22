@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'FiPA 들려드림 — 한국어촌어항공단 귀여운 AI 음성안내',
-  description: '한국어촌어항공단의 보도자료, 카드뉴스, 공지사항을 어동이가 쉬운 글과 다정한 음성으로 쏙쏙 들려드립니다.',
+  description: '한국어촌어항공단의 보도자료, 공지사항, 공고·공모를 어동이가 쉬운 글과 다정한 음성으로 쏙쏙 들려드립니다.',
 };
 
 export const viewport: Viewport = {

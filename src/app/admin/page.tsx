@@ -824,7 +824,6 @@ NEXT_PUBLIC_FIREBASE_APP_ID=1:123456789:web:abcdef`}
               >
                 <option value="ALL">전체 게시판</option>
                 <option value="PRESS">보도자료</option>
-                <option value="CARD_NEWS">카드뉴스</option>
                 <option value="NOTICE">공지사항</option>
                 <option value="RECRUIT">공고/공모</option>
               </select>
