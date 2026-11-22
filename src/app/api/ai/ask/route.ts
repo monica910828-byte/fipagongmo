@@ -2,13 +2,27 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import prisma from '@/lib/prisma';
 import { FALLBACK_POSTS } from '@/lib/fallback-posts';
-import { saveQnaToFirestore } from '@/lib/firestore-service';
+import { saveQnaToFirestore, getFirestorePosts } from '@/lib/firestore-service';
 import { verifyFirebaseToken, checkRateLimit, getClientIp } from '@/lib/server-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // Vercel Serverless Functions 타임아웃을 30초로 지정하여 긴 AI 응답 대기 보장
 export const maxDuration = 30;
+
+// 한국어촌어항공단(FiPA) 공식 홈페이지 종합 안내 기본 지식 (전체 질문 모드용)
+const FIPA_HOMEPAGE_OVERVIEW = `[한국어촌어항공단(FiPA) 공식 홈페이지 종합 안내]
+- 기관명: 한국어촌어항공단 (FiPA, 해양수산부 산하 위탁집행형 준정부기관)
+- 공식 홈페이지: https://www.fipa.or.kr
+- 설립 목적: 어촌과 어항의 개발·관리, 어촌관광 활성화, 어장 정화, 귀어귀촌 및 수산인력 육성 등을 통해 풍요롭고 살기 좋은 어촌·어항을 조성하는 공공기관입니다.
+- 주요 사업 및 서비스:
+  1) 어항 개발·관리 및 안전점검: 국가어항 및 지방어항의 건설·유지보수, 어항시설 안전점검, 어항 정화선 운영을 통한 청정어항 환경 관리
+  2) 어촌신활력증진사업 및 어촌뉴딜: 낙후된 어촌·어항의 정주여건 개선, 생활인프라 확충, 지역 경제 활성화 지원
+  3) 어촌관광 활성화 및 바다여행: 전국 어촌체험휴양마을 안내, 어촌관광 정보 제공 (바다여행 포털: https://www.seantour.kr)
+  4) 귀어귀촌 종합지원: 귀어귀촌 희망자 상담·교육·창업·정착 정보 제공 (귀어귀촌종합센터: https://www.sealife.go.kr / 상담전화: 1899-9597)
+  5) 수산공익직불제 법정의무교육 및 수산인력 교육: 어업인 대상 의무교육·온라인 교육·AI 상담 운영 (수산교육포털: https://www.susanedu.kr / 안내전화: 1600-3256)
+  6) 친환경 양식어업 육성 및 양식장 임대사업: 스마트·친환경 양식 기술 보급 및 공공 양식장 임대 지원
+  7) 공단 공식 게시판: 보도자료, 카드뉴스, 공지사항, 공고·공모(입찰·채용·지원사업 등)`;
 
 interface OpenAiRuntimeConfig {
   apiKey: string;
@@ -244,13 +258,14 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { question, postId } = await req.json();
+    const { question, postId, scope } = await req.json();
 
     if (!question || typeof question !== 'string') {
       return NextResponse.json({ success: false, error: '질문 내용을 입력해 주세요.' }, { status: 400 });
     }
 
     const trimmedQuestion = question.trim();
+    const isGeneralMode = scope === 'ALL' || !postId;
 
     // 1. Firebase 인증 토큰 및 요청 제한(Rate Limit) 점검
     const authResult = await verifyFirebaseToken(req);
@@ -275,35 +290,55 @@ export async function POST(req: NextRequest) {
     // 2. 서버 전용 환경변수 확인 (process.env['OPENAI_API_KEY']만 사용)
     const cfg = getOpenAiRuntimeConfig();
 
-    // 서버 로그에 보안 안전한 5개 진단 항목만 기록 (API 키 원문/일부/전체 목록 출력 금지)
+    // 서버 로그에 보안 안전한 진단 항목만 기록 (API 키 원문/일부/전체 목록 출력 금지)
     logSafeEnvDiagnostics('POST', cfg);
 
-    // 3. 모든 게시글 로드 (Prisma -> Fallback)
+    // 3. 모든 게시글 로드 (Firestore + Prisma + Fallback 통합·중복 제거)
     let allPosts: any[] = [];
+    const seenKeys = new Set<string>();
+    const addPostsUnique = (items: any[]) => {
+      for (const p of items) {
+        const dedupKey = p?.nttSn || p?.id || p?.title;
+        if (dedupKey && !seenKeys.has(dedupKey)) {
+          seenKeys.add(dedupKey);
+          allPosts.push(p);
+        }
+      }
+    };
+
     try {
-      allPosts = await prisma.post.findMany({
-        where: { inspectionStatus: { not: 'REJECTED' } },
-      });
+      const firestorePosts = await getFirestorePosts({ boardType: 'ALL' });
+      if (firestorePosts.length > 0) addPostsUnique(firestorePosts);
     } catch {}
 
-    if (!allPosts || allPosts.length === 0) {
-      allPosts = [...FALLBACK_POSTS];
-    }
+    try {
+      const prismaPosts = await prisma.post.findMany({
+        where: { inspectionStatus: { not: 'REJECTED' } },
+        orderBy: { registeredDate: 'desc' },
+      });
+      if (prismaPosts.length > 0) addPostsUnique(prismaPosts);
+    } catch {}
+
+    addPostsUnique(FALLBACK_POSTS);
+
+    // 최신 게시일자순 정렬
+    allPosts.sort((a, b) => String(b.registeredDate || '').localeCompare(String(a.registeredDate || '')));
 
     let relevantPost: any = null;
     let extraContextPosts: any[] = [];
+    let matchedPostsForResponse: any[] = [];
 
-    if (postId) {
+    if (!isGeneralMode && postId) {
       relevantPost = allPosts.find(p => p.id === postId || p.nttSn === postId) || null;
     }
 
-    if (!relevantPost) {
-      // 키워드 불용어 필터링 후 가중치 검색
+    if (isGeneralMode || !relevantPost) {
+      // 키워드 불용어 필터링 후 가중치 검색 (전체 공단 소식 대상)
       const STOPWORDS = new Set([
         '대해', '대하여', '관해', '관하여', '관련', '알려줘', '알려주세요', '알려줘요',
         '무엇인가요', '무엇인가', '어떻게', '어떤', '언제', '인가요', '있나요', '있을까요',
         '내용', '정보', '소식', '좀', '은', '는', '이', '가', '을', '를', '에', '의', '대한',
-        '알고', '싶어요', '부탁해', '해줘', '있어'
+        '알고', '싶어요', '부탁해', '해줘', '있어', '한국어촌어항공단', '공단', '홈페이지'
       ]);
 
       const words = trimmedQuestion
@@ -316,6 +351,7 @@ export async function POST(req: NextRequest) {
         const scored = allPosts.map(post => {
           let score = 0;
           const title = (post.title || '').toLowerCase();
+          const board = (post.boardName || '').toLowerCase();
           const summary = (post.summary || '').toLowerCase();
           const easy = (post.easyExplanation || '').toLowerCase();
           const raw = (post.rawContent || '').toLowerCase();
@@ -324,6 +360,7 @@ export async function POST(req: NextRequest) {
           words.forEach(word => {
             const w = word.toLowerCase();
             if (title.includes(w)) score += 10;
+            if (board.includes(w)) score += 6;
             if (kw.includes(w)) score += 5;
             if (easy.includes(w)) score += 3;
             if (summary.includes(w)) score += 2;
@@ -335,11 +372,12 @@ export async function POST(req: NextRequest) {
 
         if (scored.length > 0) {
           relevantPost = scored[0].post;
-          extraContextPosts = scored.slice(1, 3).map(s => s.post);
+          extraContextPosts = scored.slice(1, isGeneralMode ? 5 : 3).map(s => s.post);
+          matchedPostsForResponse = scored.slice(0, 3).map(s => s.post);
         }
       }
 
-      if (!relevantPost) {
+      if (!relevantPost && !isGeneralMode) {
         relevantPost = allPosts[0] || FALLBACK_POSTS[0];
       }
     }
@@ -365,6 +403,7 @@ export async function POST(req: NextRequest) {
       runtime: 'nodejs',
       commitSha: cfg.commitSha,
       authenticated: authResult.isValid,
+      scope: isGeneralMode ? 'ALL' : 'POST',
     };
 
     if (cfg.isDemoModeForced) {
@@ -385,28 +424,54 @@ export async function POST(req: NextRequest) {
       diagnosticInfo.openAiAttempted = true;
       try {
         const openai = new OpenAI({ apiKey: cfg.apiKey });
-        const systemPrompt = `당신은 한국어촌어항공단(FiPA)의 공식 캐릭터이자 어르신과 국민을 위한 친절한 인공지능 마스코트 '어동이'입니다.
+        const systemPrompt = isGeneralMode
+          ? `당신은 한국어촌어항공단(FiPA)의 공식 캐릭터이자 어르신과 국민을 위한 친절한 종합 안내 인공지능 마스코트 '어동이'입니다.
+아래 제공되는 [한국어촌어항공단(FiPA) 공식 홈페이지 종합 안내], [관련 공단 소식 상세], [최신 공단 소식 전체 목록]을 바탕으로 한국어촌어항공단 홈페이지의 모든 내용과 소식에 대해 친절하고 정확하게 답변해 주세요.
+- 어르신 등 디지털 취약계층 분들이 읽기·듣기 편하도록 부드럽고 다정한 한국어 경어체(~합니다, ~해 드릴게요)로 설명해 주세요.
+- 질문과 관련된 공단 사업, 포털, 신청 기간, 대상, 방법, 문의처가 있다면 핵심을 3~5문장 내외로 알기 쉽게 정리해 주세요.
+- 여러 소식이나 사업이 관련되어 있으면 항목별로 깔끔하게 정리해 안내해 주세요.
+- 제공된 정보에 없는 가상의 일정·금액·전화번호는 절대 지어내지 마시고, 더 자세한 안내는 한국어촌어항공단 공식 홈페이지(https://www.fipa.or.kr)나 관련 안내 창구를 이용하시도록 정중히 덧붙여 주세요.`
+          : `당신은 한국어촌어항공단(FiPA)의 공식 캐릭터이자 어르신과 국민을 위한 친절한 인공지능 마스코트 '어동이'입니다.
 한국어촌어항공단(FiPA)은 어촌 및 어항의 개발과 관리, 어촌관광 활성화, 수산공익직불제 법정의무교육, 귀어귀촌 지원 등을 수행하는 해양수산부 산하 공공기관입니다.
 아래 제공된 [공단 공식 소식 정보]를 근거로 사용자의 질문에 가장 친절하고 정확하게 답변해 주세요.
 - 어르신 등 디지털 취약계층 분들이 듣기 편하도록 부드럽고 다정한 한국어 경어체(~합니다, ~해 드릴게요)로 알기 쉽게 설명해 주세요.
 - 원문에 포함된 신청 기간, 대상, 방법, 문의처가 있다면 핵심만 2~4문장 내외로 명쾌하게 짚어주세요.
 - 원문에 없는 가상의 사실이나 전화번호는 지어내지 마시고, 더 자세한 안내는 공단 대표전화나 홈페이지를 통해 문의하시도록 정중히 덧붙여 주세요.`;
 
-        let contextText = relevantPost
-          ? `[주요 공단 소식 정보]
+        let contextText = '';
+        if (isGeneralMode) {
+          contextText = `${FIPA_HOMEPAGE_OVERVIEW}\n\n`;
+
+          const topMatched = [relevantPost, ...extraContextPosts].filter(Boolean);
+          if (topMatched.length > 0) {
+            contextText += `[질문과 연관된 공단 소식 상세]\n` + topMatched
+              .map((p, idx) => `${idx + 1}. [${p.boardName} | ${p.registeredDate}] ${p.title}\n- 요약: ${p.summary}\n- 쉬운 설명: ${p.easyExplanation}\n- 원문 발췌: ${(p.rawContent || '').slice(0, 700)}`)
+              .join('\n\n');
+            contextText += '\n\n';
+          }
+
+          const latestCatalog = allPosts.slice(0, 15)
+            .map((p, idx) => `${idx + 1}. [${p.boardName} | ${p.registeredDate}] ${p.title} — ${(p.summary || '').slice(0, 110)}`)
+            .join('\n');
+          contextText += `[최신 공단 홈페이지 소식 전체 목록 (총 ${allPosts.length}건 중 최신 ${Math.min(allPosts.length, 15)}건)]\n${latestCatalog}`;
+        } else {
+          contextText = relevantPost
+            ? `[주요 공단 소식 정보]
 - 소식 제목: ${relevantPost.title}
 - 소식 구분: ${relevantPost.boardName}
 - 게시일자: ${relevantPost.registeredDate}
 - 공식 소식 전문: ${relevantPost.rawContent || relevantPost.summary}
 - 쉬운 설명: ${relevantPost.easyExplanation}
 - 첨부파일/문의: ${relevantPost.attachments || '공단 홈페이지 문의'}`
-          : '[주요 공단 소식 정보]\n등록된 관련 게시글이 없어 한국어촌어항공단 일반 안내 기준으로 답변합니다.';
+            : '[주요 공단 소식 정보]\n등록된 관련 게시글이 없어 한국어촌어항공단 일반 안내 기준으로 답변합니다.';
 
-        if (extraContextPosts.length > 0) {
-          contextText += `\n\n[추가 관련 공단 소식]\n` + extraContextPosts.map(p => `- ${p.title} (${p.boardName}): ${p.summary}`).join('\n');
+          if (extraContextPosts.length > 0) {
+            contextText += `\n\n[추가 관련 공단 소식]\n` + extraContextPosts.map(p => `- ${p.title} (${p.boardName}): ${p.summary}`).join('\n');
+          }
         }
 
         const userPrompt = `[질문자 질문]\n${trimmedQuestion}\n\n${contextText}`;
+        const maxTokens = isGeneralMode ? 550 : 450;
 
         let response;
         try {
@@ -417,7 +482,7 @@ export async function POST(req: NextRequest) {
               { role: 'user', content: userPrompt },
             ],
             temperature: 0.2,
-            max_tokens: 450,
+            max_tokens: maxTokens,
           });
         } catch (mErr: any) {
           // 모델명 오류(404/400/model_not_found)인 경우에만 대체 모델로 1회 재시도
@@ -434,7 +499,7 @@ export async function POST(req: NextRequest) {
               { role: 'user', content: userPrompt },
             ],
             temperature: 0.2,
-            max_tokens: 450,
+            max_tokens: maxTokens,
           });
           diagnosticInfo.modelUsed = fallbackModel;
         }
@@ -481,7 +546,7 @@ export async function POST(req: NextRequest) {
         answer = `한국어촌어항공단 "${relevantPost.title}" 소식에 대해 알려드릴게요.\n\n${relevantPost.easyExplanation}`;
         voiceScript = `네, 한국어촌어항공단 소식에 대해 말씀드릴게요. ${relevantPost.summary}`;
       } else {
-        answer = '질문해 주신 내용에 대해 공단 게시판에서 소식을 찾고 있습니다. 자세한 문의는 한국어촌어항공단 대표전화로 연락 주시면 친절히 안내받으실 수 있습니다.';
+        answer = '한국어촌어항공단(FiPA)은 어촌·어항 개발과 관리, 어촌신활력증진사업, 어촌관광(바다여행), 귀어귀촌 종합지원(1899-9597), 수산공익직불제 의무교육(1600-3256) 등을 수행하는 공공기관입니다. 더 자세한 내용은 공단 홈페이지(https://www.fipa.or.kr)에서 확인하실 수 있습니다.';
         voiceScript = answer;
       }
       isDemo = true;
@@ -491,8 +556,8 @@ export async function POST(req: NextRequest) {
     try {
       await prisma.qnaInteraction.create({
         data: {
-          postId: relevantPost?.id || null,
-          postTitle: relevantPost?.title || null,
+          postId: isGeneralMode ? (relevantPost?.id || null) : (relevantPost?.id || null),
+          postTitle: isGeneralMode ? (relevantPost ? `[전체질문] ${relevantPost.title}` : '[전체질문] 공단 종합 안내') : (relevantPost?.title || null),
           question: trimmedQuestion,
           answer,
         },
@@ -500,8 +565,20 @@ export async function POST(req: NextRequest) {
     } catch {}
 
     try {
-      await saveQnaToFirestore(trimmedQuestion, answer, relevantPost?.id, relevantPost?.title);
+      await saveQnaToFirestore(
+        trimmedQuestion,
+        answer,
+        relevantPost?.id,
+        isGeneralMode ? (relevantPost ? `[전체질문] ${relevantPost.title}` : '[전체질문] 공단 종합 안내') : relevantPost?.title
+      );
     } catch {}
+
+    const relatedPosts = matchedPostsForResponse.map(p => ({
+      id: p.id,
+      title: p.title,
+      boardName: p.boardName,
+      registeredDate: p.registeredDate,
+    }));
 
     // 보안 원칙: 내부 환경변수/실행환경 진단 정보는 Firebase 인증된 사용자(관리자)에게만 반환
     return NextResponse.json(
@@ -510,7 +587,9 @@ export async function POST(req: NextRequest) {
         answer,
         voiceScript,
         isDemo,
+        scope: isGeneralMode ? 'ALL' : 'POST',
         relevantPost: relevantPost ? { id: relevantPost.id, title: relevantPost.title } : null,
+        relatedPosts,
         ...(authResult.isValid ? { diagnostics: diagnosticInfo } : {}),
       },
       {

@@ -73,9 +73,10 @@ export default function SeniorHomePage() {
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState('');
 
-  // 상세 모달, 질문하기 모달 및 오디오 재생 상태
+  // 상세 모달, 질문하기 모달, 전체 무엇이든 질문하기 모달 및 오디오 재생 상태
   const [activePost, setActivePost] = useState<Post | null>(null);
   const [askModalPost, setAskModalPost] = useState<Post | null>(null);
+  const [showGeneralAskModal, setShowGeneralAskModal] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
 
@@ -83,14 +84,35 @@ export default function SeniorHomePage() {
   const [userQuestion, setUserQuestion] = useState('');
   const [isAsking, setIsAsking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [aiAnswer, setAiAnswer] = useState<{ text: string; voiceScript: string; isDemo: boolean; diagnostics?: any } | null>(null);
+  const [voiceNotice, setVoiceNotice] = useState('');
+  const [aiAnswer, setAiAnswer] = useState<{
+    text: string;
+    voiceScript: string;
+    isDemo: boolean;
+    diagnostics?: any;
+    relatedPosts?: Array<{ id: string; title: string; boardName: string; registeredDate: string }>;
+  } | null>(null);
 
-  // 브라우저 TTS SpeechSynthesis 관리
+  // 브라우저 TTS SpeechSynthesis 및 STT SpeechRecognition 관리
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const recognitionRef = useRef<any>(null);
+
+  const stopVoiceRecognition = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
+    setIsListening(false);
+    setVoiceNotice('');
+  };
 
   const openPost = (post: Post) => {
+    stopVoiceRecognition();
     setAskModalPost(null);
+    setShowGeneralAskModal(false);
     setActivePost(post);
     setCurrentCardIndex(0);
     setUserQuestion('');
@@ -108,11 +130,28 @@ export default function SeniorHomePage() {
     }).catch(() => {});
   };
 
-  const openAskModal = (post: Post) => {
+  const openAskModal = (post: Post, autoStartVoice = false) => {
+    stopVoiceRecognition();
     setActivePost(null);
+    setShowGeneralAskModal(false);
     setAskModalPost(post);
     setUserQuestion('');
     setAiAnswer(null);
+    if (autoStartVoice) {
+      setTimeout(() => startVoiceRecognition(post.id), 150);
+    }
+  };
+
+  const openGeneralAskModal = (autoStartVoice = false) => {
+    stopVoiceRecognition();
+    setActivePost(null);
+    setAskModalPost(null);
+    setShowGeneralAskModal(true);
+    setUserQuestion('');
+    setAiAnswer(null);
+    if (autoStartVoice) {
+      setTimeout(() => startVoiceRecognition('__ALL__'), 150);
+    }
   };
 
   useEffect(() => {
@@ -130,6 +169,11 @@ export default function SeniorHomePage() {
     return () => {
       if (synthRef.current) {
         synthRef.current.cancel();
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {}
       }
     };
   }, []);
@@ -149,7 +193,7 @@ export default function SeniorHomePage() {
   // 모달 열림 시 모바일 배경 스크롤 잠금 (iOS Safari 스크롤 뚫림 방지)
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    const isAnyModalOpen = Boolean(activePost || askModalPost || showQrModal || showLoginModal);
+    const isAnyModalOpen = Boolean(activePost || askModalPost || showGeneralAskModal || showQrModal || showLoginModal);
     if (isAnyModalOpen) {
       const prevOverflow = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
@@ -157,7 +201,7 @@ export default function SeniorHomePage() {
         document.body.style.overflow = prevOverflow;
       };
     }
-  }, [activePost, askModalPost, showQrModal, showLoginModal]);
+  }, [activePost, askModalPost, showGeneralAskModal, showQrModal, showLoginModal]);
 
   async function loadPosts() {
     setLoading(true);
@@ -540,48 +584,95 @@ export default function SeniorHomePage() {
     };
   }
 
-  // 음성 인식 (STT) 시작
+  // 음성 인식 (STT) 시작 / 중지 토글 (모든 질문하기 버튼에서 공통 사용)
   function startVoiceRecognition(targetPostId?: string) {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert('음성 인식을 지원하지 않는 브라우저입니다. 텍스트 입력창을 이용해 주세요.');
+    // 이미 듣고 있는 중이면 중지 토글
+    if (isListening && recognitionRef.current) {
+      stopVoiceRecognition();
       return;
     }
 
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('현재 브라우저에서 음성 인식을 지원하지 않습니다. Chrome·Edge·Safari 최신 브라우저나 텍스트 입력창을 이용해 주세요.');
+      return;
+    }
+
+    // 마이크가 재생 중인 음성을 녹음하지 않도록 TTS 정지
+    stopVoice();
+
     const recognition = new SpeechRecognition();
     recognition.lang = 'ko-KR';
-    recognition.interimResults = false;
+    recognition.interimResults = true;
     recognition.maxAlternatives = 1;
+    recognitionRef.current = recognition;
+
+    let finalTranscript = '';
 
     recognition.onstart = () => {
       setIsListening(true);
+      setVoiceNotice('🎤 듣고 있어요! 궁금한 내용을 편하게 말씀해 주세요...');
     };
 
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setUserQuestion(transcript);
-      setIsListening(false);
-      handleAskQuestion(transcript, targetPostId);
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const res = event.results[i];
+        if (res.isFinal) {
+          finalTranscript += res[0].transcript;
+        } else {
+          interim += res[0].transcript;
+        }
+      }
+      const combined = (finalTranscript || interim).trim();
+      if (combined) {
+        setUserQuestion(combined);
+      }
+      if (finalTranscript.trim()) {
+        setIsListening(false);
+        setVoiceNotice('');
+        recognitionRef.current = null;
+        try {
+          recognition.stop();
+        } catch {}
+        handleAskQuestion(finalTranscript.trim(), targetPostId);
+      }
     };
 
-    recognition.onerror = () => {
+    recognition.onerror = (event: any) => {
       setIsListening(false);
+      recognitionRef.current = null;
+      if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
+        setVoiceNotice('마이크 권한이 차단되어 있습니다. 브라우저 주소창에서 마이크 권한을 허용해 주세요.');
+      } else if (event?.error === 'no-speech') {
+        setVoiceNotice('음성이 들리지 않았어요. 마이크 버튼을 다시 누르고 가까이서 말씀해 주세요.');
+      } else if (event?.error !== 'aborted') {
+        setVoiceNotice('음성 인식 중 문제가 발생했습니다. 다시 시도하시거나 글자로 입력해 주세요.');
+      }
     };
 
     recognition.onend = () => {
       setIsListening(false);
+      recognitionRef.current = null;
     };
 
-    recognition.start();
+    try {
+      recognition.start();
+    } catch {
+      setIsListening(false);
+      recognitionRef.current = null;
+      setVoiceNotice('음성 인식을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    }
   }
 
-  // 질문 전송 처리
+  // 질문 전송 처리 (단일 소식 질문 / 전체 공단 홈페이지 질문 모두 지원)
   async function handleAskQuestion(query?: string, targetPostId?: string) {
     const q = (query || userQuestion).trim();
     if (!q) return;
 
     setIsAsking(true);
     setAiAnswer(null);
+    setVoiceNotice('');
 
     try {
       let idToken = '';
@@ -596,7 +687,10 @@ export default function SeniorHomePage() {
         headers['Authorization'] = `Bearer ${idToken}`;
       }
 
-      const resolvedPostId = targetPostId || askModalPost?.id || activePost?.id || undefined;
+      const isGeneralScope = targetPostId === '__ALL__' || (showGeneralAskModal && !targetPostId);
+      const resolvedPostId = isGeneralScope
+        ? undefined
+        : (targetPostId || askModalPost?.id || activePost?.id || undefined);
 
       const res = await fetch('/api/ai/ask', {
         method: 'POST',
@@ -604,6 +698,7 @@ export default function SeniorHomePage() {
         body: JSON.stringify({
           question: q,
           postId: resolvedPostId,
+          scope: isGeneralScope || !resolvedPostId ? 'ALL' : 'POST',
         }),
       });
       const data = await res.json();
@@ -613,6 +708,7 @@ export default function SeniorHomePage() {
           voiceScript: data.voiceScript,
           isDemo: data.isDemo,
           diagnostics: data.diagnostics,
+          relatedPosts: Array.isArray(data.relatedPosts) ? data.relatedPosts : [],
         });
       } else {
         alert(data.error || '답변을 불러오지 못했습니다.');
@@ -837,6 +933,38 @@ export default function SeniorHomePage() {
               <p className={`text-base leading-relaxed font-cute break-keep ${highContrast ? 'text-yellow-100' : 'text-slate-700'}`}>
                 공단 홈페이지에 새 소식이 올라오면 <strong>홍보담당자가 따로 올리지 않아도 자동으로 쏙쏙 모아서</strong>, 어동이가 귀여운 글과 다정한 목소리로 읽어드립니다.
               </p>
+
+              {/* 🌟 메인 상단 '무엇이든 질문하기' & '음성으로 바로 질문하기' 대표 버튼 */}
+              <div className="mt-3.5 flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center justify-center sm:justify-start gap-2">
+                <button
+                  onClick={() => openGeneralAskModal(false)}
+                  className={`min-h-[48px] px-5 py-2.5 rounded-[22px] font-cute text-base md:text-lg font-bold shadow-md hover:shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 ${
+                    highContrast
+                      ? 'bg-yellow-400 text-black hover:bg-yellow-300 ring-2 ring-yellow-200'
+                      : 'bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 hover:brightness-105 text-white ring-2 ring-white/80'
+                  }`}
+                >
+                  <MessageCircle className="w-5 h-5 text-amber-200 flex-shrink-0" />
+                  <span>무엇이든 질문하기</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-normal whitespace-nowrap ${
+                    highContrast ? 'bg-black text-yellow-300' : 'bg-white/25 text-white'
+                  }`}>
+                    공단 전체 AI
+                  </span>
+                </button>
+                <button
+                  onClick={() => openGeneralAskModal(true)}
+                  className={`min-h-[48px] px-4 py-2.5 rounded-[22px] font-cute text-base flex items-center justify-center gap-1.5 shadow-sm transition-all active:scale-95 ${
+                    highContrast
+                      ? 'bg-zinc-800 text-yellow-300 border-2 border-yellow-400 hover:bg-zinc-700'
+                      : 'bg-white/95 hover:bg-emerald-50 text-emerald-900 border-2 border-emerald-300'
+                  }`}
+                  title="마이크로 바로 음성 질문하기"
+                >
+                  <Mic className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                  <span>음성으로 바로 질문하기</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1204,16 +1332,29 @@ export default function SeniorHomePage() {
                       <span>{isPlaying ? '음성 멈추기' : '🎵 어동이 목소리로 듣기'}</span>
                     </button>
 
-                    <button
-                      onClick={() => openAskModal(post)}
-                      className={`flex-1 sm:flex-initial min-h-[44px] py-2.5 px-3.5 rounded-[20px] font-cute text-sm md:text-base flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 whitespace-nowrap ${highContrast
-                        ? 'bg-yellow-400 text-black hover:bg-yellow-300 border-2 border-yellow-200'
-                        : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-emerald-200'
-                        }`}
-                    >
-                      <MessageCircle className="w-4 h-4 text-amber-200 flex-shrink-0" />
-                      <span>어동이에게 질문하기</span>
-                    </button>
+                    <div className="flex flex-1 sm:flex-initial items-center gap-1.5">
+                      <button
+                        onClick={() => openAskModal(post, false)}
+                        className={`flex-1 sm:flex-initial min-h-[44px] py-2.5 px-3.5 rounded-[20px] font-cute text-sm md:text-base flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 whitespace-nowrap ${highContrast
+                          ? 'bg-yellow-400 text-black hover:bg-yellow-300 border-2 border-yellow-200'
+                          : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-emerald-200'
+                          }`}
+                      >
+                        <MessageCircle className="w-4 h-4 text-amber-200 flex-shrink-0" />
+                        <span>어동이에게 질문하기</span>
+                      </button>
+                      <button
+                        onClick={() => openAskModal(post, true)}
+                        className={`min-w-[44px] min-h-[44px] p-2.5 rounded-[20px] font-cute flex items-center justify-center transition-all shadow-md active:scale-95 flex-shrink-0 ${highContrast
+                          ? 'bg-zinc-800 text-yellow-300 border-2 border-yellow-400 hover:bg-zinc-700'
+                          : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border-2 border-emerald-300'
+                          }`}
+                        title="이 소식에 대해 음성으로 바로 질문하기"
+                        aria-label="이 소식에 대해 음성으로 바로 질문하기"
+                      >
+                        <Mic className="w-4 h-4" />
+                      </button>
+                    </div>
 
                     <button
                       onClick={() => openPost(post)}
@@ -1249,6 +1390,7 @@ export default function SeniorHomePage() {
           className="fixed inset-0 z-50 bg-black/75 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-xs"
           onClick={() => {
             stopVoice();
+            stopVoiceRecognition();
             setActivePost(null);
             setAiAnswer(null);
           }}
@@ -1278,6 +1420,7 @@ export default function SeniorHomePage() {
               <button
                 onClick={() => {
                   stopVoice();
+                  stopVoiceRecognition();
                   setActivePost(null);
                   setAiAnswer(null);
                 }}
@@ -1505,15 +1648,15 @@ export default function SeniorHomePage() {
                   <div className="flex gap-2">
                     <button
                       onClick={() => startVoiceRecognition(activePost.id)}
-                      className={`flex-1 sm:flex-initial min-w-[48px] min-h-[46px] px-3.5 py-2.5 rounded-2xl font-cute flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 ${isListening
+                      className={`flex-1 sm:flex-initial min-w-[48px] min-h-[46px] px-3.5 py-2.5 rounded-2xl font-cute flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 whitespace-nowrap ${isListening
                         ? 'bg-rose-500 text-white animate-pulse'
                         : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                         }`}
                       title="마이크로 말하기"
                       aria-label="마이크로 말하기"
                     >
-                      {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-                      <span className="sm:hidden text-sm">{isListening ? '듣는 중...' : '음성 질문'}</span>
+                      {isListening ? <MicOff className="w-5 h-5 flex-shrink-0" /> : <Mic className="w-5 h-5 flex-shrink-0" />}
+                      <span className="text-sm sm:text-base">{isListening ? '듣는 중...' : '음성 질문'}</span>
                     </button>
                     <button
                       onClick={() => handleAskQuestion(undefined, activePost.id)}
@@ -1525,6 +1668,15 @@ export default function SeniorHomePage() {
                     </button>
                   </div>
                 </div>
+
+                {voiceNotice && (
+                  <div className={`p-2.5 mb-2 text-center text-sm font-cute rounded-2xl border break-keep ${isListening
+                    ? 'bg-rose-50 text-rose-800 border-rose-200 animate-pulse'
+                    : 'bg-amber-50 text-amber-900 border-amber-200'
+                    }`}>
+                    {voiceNotice}
+                  </div>
+                )}
 
                 {isAsking && (
                   <div className="p-3 text-center text-sm font-cute text-emerald-800 animate-pulse bg-white/80 rounded-2xl border border-emerald-200 break-keep">
@@ -1588,6 +1740,7 @@ export default function SeniorHomePage() {
           className="fixed inset-0 z-50 bg-black/75 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-xs"
           onClick={() => {
             stopVoice();
+            stopVoiceRecognition();
             setAskModalPost(null);
             setAiAnswer(null);
           }}
@@ -1617,6 +1770,7 @@ export default function SeniorHomePage() {
               <button
                 onClick={() => {
                   stopVoice();
+                  stopVoiceRecognition();
                   setAskModalPost(null);
                   setAiAnswer(null);
                 }}
@@ -1706,15 +1860,15 @@ export default function SeniorHomePage() {
                   <div className="flex gap-2">
                     <button
                       onClick={() => startVoiceRecognition(askModalPost.id)}
-                      className={`flex-1 sm:flex-initial min-w-[48px] min-h-[46px] px-3.5 py-2.5 rounded-2xl font-cute flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 ${isListening
+                      className={`flex-1 sm:flex-initial min-w-[48px] min-h-[46px] px-3.5 py-2.5 rounded-2xl font-cute flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 whitespace-nowrap ${isListening
                         ? 'bg-rose-500 text-white animate-pulse'
                         : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                         }`}
                       title="마이크로 말하기"
                       aria-label="마이크로 말하기"
                     >
-                      {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-                      <span className="sm:hidden text-sm">{isListening ? '듣는 중...' : '음성 질문'}</span>
+                      {isListening ? <MicOff className="w-5 h-5 flex-shrink-0" /> : <Mic className="w-5 h-5 flex-shrink-0" />}
+                      <span className="text-sm sm:text-base">{isListening ? '듣는 중...' : '음성 질문'}</span>
                     </button>
                     <button
                       onClick={() => handleAskQuestion(undefined, askModalPost.id)}
@@ -1726,6 +1880,15 @@ export default function SeniorHomePage() {
                     </button>
                   </div>
                 </div>
+
+                {voiceNotice && (
+                  <div className={`p-2.5 mb-2 text-center text-sm font-cute rounded-2xl border break-keep ${isListening
+                    ? 'bg-rose-50 text-rose-800 border-rose-200 animate-pulse'
+                    : 'bg-amber-50 text-amber-900 border-amber-200'
+                    }`}>
+                    {voiceNotice}
+                  </div>
+                )}
 
                 {isAsking && (
                   <div className="p-3 text-center text-sm font-cute text-emerald-800 animate-pulse bg-white/80 rounded-2xl border border-emerald-200 break-keep">
@@ -1784,6 +1947,254 @@ export default function SeniorHomePage() {
                   className="inline-flex items-center gap-1 min-h-[44px] px-2 text-sm font-cute text-[#0284C7] hover:underline whitespace-nowrap"
                 >
                   <span>공단 원문 보기</span>
+                  <ExternalLink className="w-4 h-4 flex-shrink-0" />
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 8-2. 한국어촌어항공단 홈페이지 전체 '무엇이든 질문하기' 통합 AI 모달 */}
+      {showGeneralAskModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-xs"
+          onClick={() => {
+            stopVoice();
+            stopVoiceRecognition();
+            setShowGeneralAskModal(false);
+            setAiAnswer(null);
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`w-full sm:max-w-2xl max-h-[94dvh] sm:max-h-[90vh] rounded-t-[28px] sm:rounded-[36px] overflow-hidden flex flex-col shadow-2xl border-t-4 sm:border-4 ${highContrast ? 'bg-zinc-950 border-yellow-400 text-yellow-300' : 'bg-white border-teal-200 text-slate-900'
+              }`}
+          >
+            {/* 모달 헤더 */}
+            <div className={`p-3.5 sm:p-5 flex items-center justify-between gap-2 border-b flex-shrink-0 ${highContrast ? 'border-yellow-400/50 bg-zinc-900' : 'bg-gradient-to-r from-teal-500 via-emerald-500 to-sky-500 text-white'
+              }`}>
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-white p-1 shadow-sm flex items-center justify-center border-2 border-amber-300 flex-shrink-0">
+                  <img src="/eodongi_official.png" alt="어동이 종합 안내" className="w-8 h-8 sm:w-9 sm:h-9 object-contain" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="font-cute text-lg md:text-xl leading-tight break-keep">
+                    한국어촌어항공단 무엇이든 질문하기 💬
+                  </h2>
+                  <p className="text-xs opacity-95 font-cute leading-snug break-keep">
+                    공단 홈페이지의 모든 사업·교육·공모·최신 소식을 글이나 음성으로 물어보세요
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  stopVoice();
+                  stopVoiceRecognition();
+                  setShowGeneralAskModal(false);
+                  setAiAnswer(null);
+                }}
+                className={`min-w-[44px] min-h-[44px] p-2 rounded-2xl transition-colors flex items-center justify-center flex-shrink-0 ${highContrast ? 'bg-yellow-400 text-black' : 'bg-white/25 hover:bg-white/35 text-white'
+                  }`}
+                title="닫기"
+                aria-label="닫기"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* 모달 본문 */}
+            <div className="p-4 sm:p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain space-y-4 sm:space-y-5 flex-1 bg-bubble-pattern">
+
+              {/* 통합 AI 안내 배너 */}
+              <div className={`p-3.5 sm:p-4 rounded-2xl border-2 ${highContrast ? 'bg-zinc-900 border-yellow-400 text-yellow-200' : 'bg-sky-50/90 border-sky-200 text-slate-800'
+                }`}>
+                <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-cute font-bold whitespace-nowrap ${highContrast ? 'bg-yellow-400 text-black' : 'bg-[#0284C7] text-white'
+                    }`}>
+                    🌊 공단 홈페이지 전체 통합 검색 AI
+                  </span>
+                  <span className="text-xs opacity-80 font-cute">
+                    보도자료 · 카드뉴스 · 공지사항 · 공고·공모 · 주요 사업 전체 연동
+                  </span>
+                </div>
+                <p className="font-cute text-sm sm:text-base leading-relaxed break-keep">
+                  특정 글 하나만이 아니라 어항 관리, 어촌관광(바다여행), 귀어귀촌, 수산공익직불제 의무교육, 최신 공모·지원사업까지 한국어촌어항공단 홈페이지의 모든 내용을 질문하실 수 있습니다.
+                </p>
+              </div>
+
+              {/* 질문 입력 및 AI 답변 박스 */}
+              <div className={`p-4 sm:p-5 md:p-6 rounded-[24px] sm:rounded-[28px] border-4 ${highContrast ? 'bg-zinc-900 border-yellow-400' : 'bg-gradient-to-r from-emerald-50 via-teal-50 to-sky-50 border-emerald-200 shadow-sm'
+                }`}>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex-shrink-0">
+                    <img src="/eodongi_official.png" alt="어동이 경청" className="w-12 h-12 sm:w-14 sm:h-14 object-contain drop-shadow" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className={`font-cute text-base md:text-lg break-keep ${highContrast ? 'text-yellow-300' : 'text-emerald-950'}`}>
+                      글자나 목소리로 편하게 물어보세요!
+                    </h3>
+                    <p className={`text-xs md:text-sm font-cute break-keep ${highContrast ? 'text-yellow-100' : 'text-emerald-800'}`}>
+                      🎤 음성 질문 버튼을 누르고 말씀하시면 자동으로 질문이 전송됩니다.
+                    </p>
+                  </div>
+                </div>
+
+                {/* 공단 전체 자주 묻는 예시 질문 */}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {[
+                    '한국어촌어항공단은 어떤 일을 하는 곳인가요?',
+                    '최근 올라온 공단 소식과 공모를 알려주세요',
+                    '수산공익직불제 의무교육은 어떻게 신청하나요?',
+                    '귀어귀촌 지원이나 어촌체험마을 안내해 주세요',
+                  ].map((sampleQ) => (
+                    <button
+                      key={sampleQ}
+                      onClick={() => {
+                        setUserQuestion(sampleQ);
+                        handleAskQuestion(sampleQ, '__ALL__');
+                      }}
+                      disabled={isAsking}
+                      className={`min-h-[38px] px-3 py-1.5 rounded-2xl text-xs sm:text-sm font-cute text-left transition-all active:scale-95 break-keep ${highContrast
+                        ? 'bg-zinc-800 text-yellow-200 border border-yellow-400 hover:bg-zinc-700'
+                        : 'bg-white/95 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 shadow-2xs'
+                        }`}
+                    >
+                      ✨ {sampleQ}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 입력창 + 음성 질문 + 질문하기 */}
+                <div className="flex flex-col sm:flex-row gap-2 mb-3 mt-2">
+                  <input
+                    type="text"
+                    value={userQuestion}
+                    onChange={(e) => setUserQuestion(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAskQuestion(undefined, '__ALL__')}
+                    onFocus={(e) => {
+                      const el = e.currentTarget;
+                      setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 250);
+                    }}
+                    placeholder="예: 귀어귀촌 상담 번호가 뭐예요? 최근 교육 소식 알려줘"
+                    className={`w-full sm:flex-1 min-h-[48px] py-3 px-4 rounded-2xl border-2 font-cute text-base md:text-lg ${highContrast ? 'bg-black border-yellow-400 text-yellow-200' : 'bg-white border-emerald-300 text-slate-900 shadow-sm focus:border-emerald-500'
+                      }`}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => startVoiceRecognition('__ALL__')}
+                      className={`flex-1 sm:flex-initial min-w-[48px] min-h-[46px] px-3.5 py-2.5 rounded-2xl font-cute flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 whitespace-nowrap ${isListening
+                        ? 'bg-rose-500 text-white animate-pulse'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        }`}
+                      title="마이크로 말하기"
+                      aria-label="마이크로 말하기"
+                    >
+                      {isListening ? <MicOff className="w-5 h-5 flex-shrink-0" /> : <Mic className="w-5 h-5 flex-shrink-0" />}
+                      <span className="text-sm sm:text-base">{isListening ? '듣는 중...' : '음성 질문'}</span>
+                    </button>
+                    <button
+                      onClick={() => handleAskQuestion(undefined, '__ALL__')}
+                      disabled={isAsking}
+                      className="flex-1 sm:flex-initial min-h-[46px] py-2.5 px-5 rounded-2xl bg-[#0284C7] hover:bg-[#0369A1] text-white font-cute text-base flex items-center justify-center gap-1.5 shadow-md active:scale-95 whitespace-nowrap"
+                    >
+                      <Send className="w-5 h-5 flex-shrink-0" />
+                      <span>질문하기</span>
+                    </button>
+                  </div>
+                </div>
+
+                {voiceNotice && (
+                  <div className={`p-2.5 mb-2 text-center text-sm font-cute rounded-2xl border break-keep ${isListening
+                    ? 'bg-rose-50 text-rose-800 border-rose-200 animate-pulse'
+                    : 'bg-amber-50 text-amber-900 border-amber-200'
+                    }`}>
+                    {voiceNotice}
+                  </div>
+                )}
+
+                {isAsking && (
+                  <div className="p-3 text-center text-sm font-cute text-emerald-800 animate-pulse bg-white/80 rounded-2xl border border-emerald-200 break-keep">
+                    어동이가 한국어촌어항공단 홈페이지 전체 내용을 살펴보고 있습니다... 🐬✨
+                  </div>
+                )}
+
+                {aiAnswer && (
+                  <div className={`p-4 rounded-2xl mt-3 shadow-sm ${highContrast ? 'bg-black border border-yellow-400 text-yellow-300' : 'bg-white border-2 border-emerald-300 text-slate-900'
+                    }`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 pb-2 border-b border-emerald-100 font-cute">
+                      <span className={`text-sm sm:text-base flex items-center gap-1.5 font-bold ${highContrast ? 'text-yellow-300' : 'text-emerald-800'}`}>
+                        <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                        <span>어동이의 AI 답변 {!aiAnswer.isDemo ? '(AI 실시간 연동 ✨)' : '(공단 기본 안내 ℹ️)'}</span>
+                      </span>
+                      <button
+                        onClick={() => toggleVoice(aiAnswer.voiceScript)}
+                        className={`min-h-[40px] px-3.5 py-1.5 rounded-xl text-sm font-cute flex items-center gap-1.5 shadow-sm transition-colors ${isPlaying
+                          ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse'
+                          : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-900'
+                          }`}
+                      >
+                        {isPlaying ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                        <span>{isPlaying ? '음성 멈추기' : '음성 듣기'}</span>
+                      </button>
+                    </div>
+
+                    {aiAnswer.isDemo && aiAnswer.diagnostics?.message && (
+                      <p className="text-xs text-amber-800 bg-amber-50 px-2.5 py-1.5 rounded-xl mb-2 font-cute border border-amber-200 break-keep [overflow-wrap:anywhere]">
+                        💡 {aiAnswer.diagnostics.message}
+                      </p>
+                    )}
+
+                    <p className={`${textClass} whitespace-pre-line leading-relaxed font-cute break-keep [overflow-wrap:anywhere]`}>
+                      {aiAnswer.text}
+                    </p>
+
+                    {/* 질문과 관련된 공단 소식 바로가기 */}
+                    {aiAnswer.relatedPosts && aiAnswer.relatedPosts.length > 0 && (
+                      <div className="mt-4 pt-3 border-t border-emerald-100">
+                        <p className="text-xs sm:text-sm font-cute font-bold text-sky-900 mb-2">
+                          📌 관련 공단 소식 바로 보기
+                        </p>
+                        <div className="space-y-1.5">
+                          {aiAnswer.relatedPosts.map((rp) => {
+                            const matchedFull = posts.find(p => p.id === rp.id || p.title === rp.title);
+                            return (
+                              <button
+                                key={rp.id}
+                                onClick={() => {
+                                  if (matchedFull) {
+                                    openPost(matchedFull);
+                                  }
+                                }}
+                                disabled={!matchedFull}
+                                className={`w-full text-left p-2.5 rounded-xl border transition-colors flex flex-wrap items-center justify-between gap-1.5 font-cute text-xs sm:text-sm ${highContrast
+                                  ? 'bg-zinc-900 border-yellow-400 text-yellow-200 hover:bg-zinc-800'
+                                  : 'bg-sky-50/80 hover:bg-sky-100 border-sky-200 text-slate-800'
+                                  }`}
+                              >
+                                <span className="font-bold break-keep flex-1 min-w-0">
+                                  [{rp.boardName}] {rp.title}
+                                </span>
+                                <span className="text-xs opacity-70 whitespace-nowrap">📅 {rp.registeredDate} →</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 하단 공단 공식 홈페이지 바로가기 */}
+              <div className="pt-1 text-center">
+                <a
+                  href="https://www.fipa.or.kr"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 text-sm sm:text-base font-cute text-[#0284C7] hover:underline"
+                >
+                  <span>한국어촌어항공단 공식 홈페이지(www.fipa.or.kr) 바로가기</span>
                   <ExternalLink className="w-4 h-4 flex-shrink-0" />
                 </a>
               </div>
