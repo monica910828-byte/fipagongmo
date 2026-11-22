@@ -830,7 +830,7 @@ export default function SeniorHomePage() {
                   </h1>
                 </button>
                 <span className="hidden sm:inline-flex text-xs bg-amber-300 text-blue-950 font-cute px-2.5 py-0.5 rounded-full shadow-sm items-center gap-1 animate-cute-wiggle whitespace-nowrap">
-                  <span>어동이와 바다 여행</span> 🐬
+                  <span>어동이와 바다 여행</span> 🦐
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-sky-100 font-cute flex items-center gap-1 opacity-95 leading-tight">
@@ -944,7 +944,7 @@ export default function SeniorHomePage() {
               <Eodongi
                 pose="greeting"
                 size={115}
-                speechText="소식을 쏙쏙 들려줄게요! 🐬✨"
+                speechText="소식을 쏙쏙 들려줄게요! 🦐✨"
                 showSparkle={true}
                 className="hover:scale-105 transition-transform"
               />
@@ -1000,7 +1000,7 @@ export default function SeniorHomePage() {
 
           {/* 배경 귀여운 장식 스티커들 */}
           <div className="absolute right-3 -bottom-3 text-6xl sm:text-7xl opacity-15 pointer-events-none select-none">
-            🐬
+            🦐
           </div>
           <div className="absolute left-6 -top-2 text-3xl sm:text-4xl opacity-15 pointer-events-none select-none">
             🎈
@@ -1709,7 +1709,7 @@ export default function SeniorHomePage() {
 
                 {isAsking && (
                   <div className="p-3 text-center text-sm font-cute text-emerald-800 animate-pulse bg-white/80 rounded-2xl border border-emerald-200 break-keep">
-                    어동이가 공단 소식에서 정답을 열심히 찾고 있습니다... 🐬✨
+                    어동이가 공단 소식에서 정답을 열심히 찾고 있습니다... 🦐✨
                   </div>
                 )}
 
@@ -1921,7 +1921,7 @@ export default function SeniorHomePage() {
 
                 {isAsking && (
                   <div className="p-3 text-center text-sm font-cute text-emerald-800 animate-pulse bg-white/80 rounded-2xl border border-emerald-200 break-keep">
-                    어동이가 공단 소식에서 정답을 열심히 찾고 있습니다... 🐬✨
+                    어동이가 공단 소식에서 정답을 열심히 찾고 있습니다... 🦐✨
                   </div>
                 )}
 
@@ -2144,7 +2144,7 @@ export default function SeniorHomePage() {
 
                 {isAsking && (
                   <div className="p-3 text-center text-sm font-cute text-emerald-800 animate-pulse bg-white/80 rounded-2xl border border-emerald-200 break-keep">
-                    어동이가 한국어촌어항공단 홈페이지 전체 내용을 살펴보고 있습니다... 🐬✨
+                    어동이가 한국어촌어항공단 홈페이지 전체 내용을 살펴보고 있습니다... 🦐✨
                   </div>
                 )}
 
