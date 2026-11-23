@@ -1,7 +1,13 @@
 import * as cheerio from 'cheerio';
 import crypto from 'crypto';
 import prisma from './prisma';
-import { transformContentWithOpenAI, transformContentWithRuleEngine, checkSafetyOrPolicy } from './ai-pipeline';
+import { transformContentWithOpenAI } from './ai-pipeline';
+import { isFirebaseConfigured } from './firebase';
+import {
+  getFirestorePosts,
+  savePostToFirestore,
+  saveSyncLogToFirestore,
+} from './firestore-service';
 
 export interface BoardDefinition {
   boardType: 'PRESS' | 'CARD_NEWS' | 'NOTICE' | 'RECRUIT';
@@ -16,12 +22,6 @@ export const TARGET_BOARDS: BoardDefinition[] = [
     boardName: '보도자료',
     boardId: 'i-171',
     listUrl: 'https://www.fipa.or.kr/fipa/bbs/i-171/list.do',
-  },
-  {
-    boardType: 'CARD_NEWS',
-    boardName: '카드뉴스',
-    boardId: 'i-170',
-    listUrl: 'https://www.fipa.or.kr/fipa/bbs/i-170/list.do',
   },
   {
     boardType: 'NOTICE',
@@ -293,19 +293,49 @@ export async function syncBoard(
   board: BoardDefinition,
   provider: ContentProvider = new FipaHtmlScraper(),
   itemLimit = 10
-): Promise<{ found: number; newItems: number; updated: number; failed: number }> {
+): Promise<{ found: number; newItems: number; updated: number; failed: number; firestoreSaved: number }> {
   let found = 0;
   let newItems = 0;
   let updated = 0;
   let failed = 0;
+  let firestoreSaved = 0;
 
   try {
+    // 1. 기존 저장된 게시물 조회 (Firestore 우선 + Prisma 보조, Vercel 읽기 전용 파일시스템 안전 대응)
+    const existingByNttSn = new Map<string, any>();
+    const firebaseReady = isFirebaseConfigured();
+
+    if (firebaseReady) {
+      try {
+        const fsPosts = await getFirestorePosts({ boardType: board.boardType, forAdmin: true });
+        for (const p of fsPosts) {
+          if (p.nttSn) existingByNttSn.set(String(p.nttSn), p);
+        }
+      } catch (e: any) {
+        console.warn(`[Firestore 기존목록 조회 경고] ${board.boardName}:`, e?.message);
+      }
+    }
+
+    try {
+      const dbPosts = await prisma.post.findMany({ where: { boardId: board.boardId } });
+      for (const p of dbPosts) {
+        if (p.nttSn && !existingByNttSn.has(String(p.nttSn))) {
+          existingByNttSn.set(String(p.nttSn), p);
+        }
+      }
+    } catch {
+      // Vercel 서버리스 SQLite 읽기 전용 환경에서는 Prisma 조회 실패 시 무시하고 Firestore 기준으로 진행
+    }
+
     const list = await provider.fetchBoardList(board);
     found = list.length;
     const targetSlice = list.slice(0, itemLimit);
 
     for (const item of targetSlice) {
       try {
+        // 기존 게시물 확인 (Firestore + Prisma 통합 맵)
+        const existing = existingByNttSn.get(String(item.nttSn)) || null;
+
         // 상세 데이터 수집
         const detail = await provider.fetchPostDetail(board, item.nttSn);
 
@@ -313,106 +343,108 @@ export async function syncBoard(
         const combinedContent = `${detail.title}|${detail.registeredDate}|${detail.textContent}|${detail.cardImages.join(',')}`;
         const contentHash = crypto.createHash('sha256').update(combinedContent).digest('hex');
 
-        // 기존 게시물 확인
-        const existing = await prisma.post.findUnique({
-          where: {
-            boardId_nttSn: {
-              boardId: board.boardId,
-              nttSn: item.nttSn,
+        const isUnchanged =
+          existing &&
+          ((existing.contentHash && existing.contentHash === contentHash) ||
+            (!existing.contentHash && existing.title === detail.title && existing.registeredDate === (detail.registeredDate || item.registeredDate)));
+
+        if (isUnchanged) {
+          // 변경사항 없음: 로컬 Prisma가 쓰기 가능한 경우에만 최종 확인 시각 갱신
+          try {
+            if (existing.id) {
+              await prisma.post.update({
+                where: { id: existing.id },
+                data: {
+                  lastCheckedAt: new Date(),
+                  isDeletedOnSource: false,
+                },
+              });
+            }
+          } catch {}
+          continue;
+        }
+
+        // 신규 또는 내용 변경됨: AI 변환 파이프라인 가동
+        const aiResult = await transformContentWithOpenAI(
+          detail.title,
+          detail.textContent,
+          board.boardType,
+          detail.cardImages.length
+        );
+
+        const stableId = existing?.id || `fipa_${board.boardId}_${item.nttSn}`;
+        // 관리자가 명시적으로 숨김/거부 처리한 기존 글이 아니라면 자동 발행하여 메인에 즉시 반영
+        const preservedHidden =
+          existing?.inspectionStatus === 'UNPUBLISHED' || existing?.inspectionStatus === 'REJECTED';
+        const resolvedStatus = preservedHidden ? existing.inspectionStatus : 'AUTO_PUBLISHED';
+
+        const nowIso = new Date().toISOString();
+        const postPayload = {
+          id: stableId,
+          boardType: board.boardType,
+          boardName: board.boardName,
+          boardId: board.boardId,
+          nttSn: item.nttSn,
+          title: detail.title,
+          registeredDate: detail.registeredDate || item.registeredDate,
+          views: detail.views,
+          author: detail.author,
+          originalUrl: item.detailUrl,
+          thumbnailUrl: item.thumbnailUrl || detail.cardImages[0] || null,
+          cardImages: JSON.stringify(detail.cardImages),
+          attachments: JSON.stringify(detail.attachments),
+          rawContent: detail.textContent,
+          summary: aiResult.summary,
+          easyExplanation: aiResult.easyExplanation,
+          voiceScript: aiResult.voiceScript,
+          qnaPairs: JSON.stringify(aiResult.qnaPairs),
+          contentHash,
+          isSafetyOrPolicy: aiResult.isSafetyOrPolicy,
+          policyKeywords: aiResult.policyKeywords.join(', '),
+          inspectionStatus: resolvedStatus,
+          aiModelUsed: aiResult.aiModelUsed,
+          isDemo: aiResult.isDemo,
+          isDeletedOnSource: false,
+          lastCheckedAt: nowIso,
+        };
+
+        // 2. Firebase Firestore 영구 저장 (Vercel 운영 환경 핵심 저장소)
+        if (firebaseReady) {
+          const saved = await savePostToFirestore(postPayload);
+          if (saved) firestoreSaved++;
+        }
+
+        // 3. 로컬 SQLite(Prisma) 동기화 (Vercel 서버리스에서는 읽기 전용일 수 있으므로 비치명적 처리)
+        try {
+          const { id: _ignoreId, lastCheckedAt: _ignoreTs, ...prismaData } = postPayload;
+          await prisma.post.upsert({
+            where: {
+              boardId_nttSn: {
+                boardId: board.boardId,
+                nttSn: item.nttSn,
+              },
             },
-          },
-        });
+            update: {
+              ...prismaData,
+              lastCheckedAt: new Date(),
+            },
+            create: {
+              ...prismaData,
+              lastCheckedAt: new Date(),
+            },
+          });
+        } catch {
+          // Vercel 읽기 전용 SQLite 환경 무시 (Firestore 저장 완료)
+        }
 
         if (existing) {
-          if (existing.contentHash === contentHash) {
-            // 변경사항 없음: 최종 확인 시각만 갱신
-            await prisma.post.update({
-              where: { id: existing.id },
-              data: {
-                lastCheckedAt: new Date(),
-                isDeletedOnSource: false,
-              },
-            });
-            continue;
-          }
-
-          // 내용 변경됨: AI 재분석 수행 및 재검토 상태 전환
-          const aiResult = await transformContentWithOpenAI(
-            detail.title,
-            detail.textContent,
-            board.boardType,
-            detail.cardImages.length
-          );
-
-          await prisma.post.update({
-            where: { id: existing.id },
-            data: {
-              title: detail.title,
-              registeredDate: detail.registeredDate,
-              views: detail.views,
-              rawContent: detail.textContent,
-              thumbnailUrl: item.thumbnailUrl || detail.cardImages[0] || null,
-              cardImages: JSON.stringify(detail.cardImages),
-              attachments: JSON.stringify(detail.attachments),
-              summary: aiResult.summary,
-              easyExplanation: aiResult.easyExplanation,
-              voiceScript: aiResult.voiceScript,
-              qnaPairs: JSON.stringify(aiResult.qnaPairs),
-              contentHash,
-              isSafetyOrPolicy: aiResult.isSafetyOrPolicy,
-              policyKeywords: aiResult.policyKeywords.join(', '),
-              inspectionStatus: aiResult.isSafetyOrPolicy ? 'PENDING_REVIEW' : existing.inspectionStatus,
-              aiModelUsed: aiResult.aiModelUsed,
-              isDemo: aiResult.isDemo,
-              lastCheckedAt: new Date(),
-              isDeletedOnSource: false,
-            },
-          });
-
           updated++;
         } else {
-          // 신규 게시물 등록: AI 변환 파이프라인 가동
-          const aiResult = await transformContentWithOpenAI(
-            detail.title,
-            detail.textContent,
-            board.boardType,
-            detail.cardImages.length
-          );
-
-          await prisma.post.create({
-            data: {
-              boardType: board.boardType,
-              boardName: board.boardName,
-              boardId: board.boardId,
-              nttSn: item.nttSn,
-              title: detail.title,
-              registeredDate: detail.registeredDate || item.registeredDate,
-              views: detail.views,
-              author: detail.author,
-              originalUrl: item.detailUrl,
-              thumbnailUrl: item.thumbnailUrl || detail.cardImages[0] || null,
-              cardImages: JSON.stringify(detail.cardImages),
-              attachments: JSON.stringify(detail.attachments),
-              rawContent: detail.textContent,
-              summary: aiResult.summary,
-              easyExplanation: aiResult.easyExplanation,
-              voiceScript: aiResult.voiceScript,
-              qnaPairs: JSON.stringify(aiResult.qnaPairs),
-              contentHash,
-              isSafetyOrPolicy: aiResult.isSafetyOrPolicy,
-              policyKeywords: aiResult.policyKeywords.join(', '),
-              inspectionStatus: aiResult.inspectionStatus,
-              aiModelUsed: aiResult.aiModelUsed,
-              isDemo: aiResult.isDemo,
-              lastCheckedAt: new Date(),
-            },
-          });
-
           newItems++;
         }
 
-        // 공단 서버 부하 방지를 위한 정중한 지연(500ms)
-        await new Promise(r => setTimeout(r, 500));
+        // 공단 서버 부하 방지를 위한 정중한 지연(250ms)
+        await new Promise(r => setTimeout(r, 250));
       } catch (err: any) {
         console.error(`[동기화 오류] ${board.boardName} ntt_sn=${item.nttSn}:`, err.message);
         failed++;
@@ -423,27 +455,44 @@ export async function syncBoard(
     throw err;
   }
 
-  return { found, newItems, updated, failed };
+  return { found, newItems, updated, failed, firestoreSaved };
 }
 
 /**
- * 전체 4개 게시판 통합 동기화
+ * 전체 3개 활성 게시판 통합 동기화 (보도자료/공지사항/공고·공모)
+ * - Firestore 우선 영구 저장 + 로컬 Prisma 보조 저장 (Vercel 서버리스 완벽 호환)
  */
-export async function syncAllBoards(itemLimit = 5) {
-  const log = await prisma.syncLog.create({
-    data: {
-      boardId: 'ALL',
-      boardName: '전체 4대 게시판 (보도자료/카드뉴스/공지사항/공고공모)',
-      status: 'RUNNING',
-      startedAt: new Date(),
-    },
-  });
+export async function syncAllBoards(itemLimit = 5, triggerSource = 'MANUAL') {
+  const startedAt = new Date();
+  let prismaLogId: number | null = null;
+
+  try {
+    const log = await prisma.syncLog.create({
+      data: {
+        boardId: 'ALL',
+        boardName: '전체 공단 게시판 (보도자료/공지사항/공고·공모)',
+        status: 'RUNNING',
+        startedAt,
+      },
+    });
+    prismaLogId = log.id;
+  } catch {
+    // Vercel 서버리스 읽기 전용 SQLite 환경에서는 Prisma 로그 생성을 건너뜀
+  }
 
   let totalFound = 0;
   let totalNew = 0;
   let totalUpdated = 0;
   let totalFailed = 0;
+  let totalFirestoreSaved = 0;
   let errorMessage: string | null = null;
+  const boardResults: Array<{
+    boardName: string;
+    found: number;
+    newItems: number;
+    updated: number;
+    failed: number;
+  }> = [];
 
   try {
     for (const board of TARGET_BOARDS) {
@@ -453,42 +502,99 @@ export async function syncAllBoards(itemLimit = 5) {
         totalNew += res.newItems;
         totalUpdated += res.updated;
         totalFailed += res.failed;
+        totalFirestoreSaved += res.firestoreSaved;
+        boardResults.push({
+          boardName: board.boardName,
+          found: res.found,
+          newItems: res.newItems,
+          updated: res.updated,
+          failed: res.failed,
+        });
       } catch (e: any) {
         totalFailed++;
         errorMessage = (errorMessage ? errorMessage + '; ' : '') + `[${board.boardName}] ${e.message}`;
       }
     }
 
-    await prisma.syncLog.update({
-      where: { id: log.id },
-      data: {
-        status: totalFailed > 0 && totalNew === 0 && totalUpdated === 0 ? 'FAILED' : 'SUCCESS',
+    const completedAt = new Date();
+    const finalStatus = totalFailed > 0 && totalNew === 0 && totalUpdated === 0 && totalFound === 0 ? 'FAILED' : 'SUCCESS';
+
+    // Firestore 동기화 로그 기록 (운영 대시보드 및 중복 실행 방지용)
+    if (isFirebaseConfigured()) {
+      await saveSyncLogToFirestore({
+        boardId: 'ALL',
+        boardName: '전체 공단 게시판 (보도자료/공지사항/공고·공모)',
+        status: finalStatus,
         itemsFound: totalFound,
         itemsNew: totalNew,
         itemsUpdated: totalUpdated,
         itemsFailed: totalFailed,
+        triggerSource,
+        startedAt: startedAt.toISOString(),
+        completedAt: completedAt.toISOString(),
         errorMessage,
-        completedAt: new Date(),
-      },
-    });
+      });
+    }
+
+    if (prismaLogId !== null) {
+      try {
+        await prisma.syncLog.update({
+          where: { id: prismaLogId },
+          data: {
+            status: finalStatus,
+            itemsFound: totalFound,
+            itemsNew: totalNew,
+            itemsUpdated: totalUpdated,
+            itemsFailed: totalFailed,
+            errorMessage,
+            completedAt,
+          },
+        });
+      } catch {}
+    }
 
     return {
-      success: true,
+      success: finalStatus === 'SUCCESS',
+      status: finalStatus,
+      triggerSource,
       totalFound,
       totalNew,
       totalUpdated,
       totalFailed,
+      totalFirestoreSaved,
+      boardResults,
       errorMessage,
+      startedAt: startedAt.toISOString(),
+      completedAt: completedAt.toISOString(),
     };
   } catch (err: any) {
-    await prisma.syncLog.update({
-      where: { id: log.id },
-      data: {
+    if (isFirebaseConfigured()) {
+      await saveSyncLogToFirestore({
+        boardId: 'ALL',
+        boardName: '전체 공단 게시판 (보도자료/공지사항/공고·공모)',
         status: 'FAILED',
+        itemsFound: totalFound,
+        itemsNew: totalNew,
+        itemsUpdated: totalUpdated,
+        itemsFailed: totalFailed + 1,
+        triggerSource,
+        startedAt: startedAt.toISOString(),
+        completedAt: new Date().toISOString(),
         errorMessage: err.message,
-        completedAt: new Date(),
-      },
-    });
+      }).catch(() => {});
+    }
+    if (prismaLogId !== null) {
+      try {
+        await prisma.syncLog.update({
+          where: { id: prismaLogId },
+          data: {
+            status: 'FAILED',
+            errorMessage: err.message,
+            completedAt: new Date(),
+          },
+        });
+      } catch {}
+    }
     throw err;
   }
 }

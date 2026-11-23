@@ -36,6 +36,7 @@ export interface FirestorePost {
   easyExplanation: string;
   voiceScript: string;
   qnaPairs?: string | null;
+  contentHash?: string | null;
   isSafetyOrPolicy: boolean;
   policyKeywords?: string | null;
   inspectionStatus: string; // AUTO_PUBLISHED, PENDING_REVIEW, APPROVED, REJECTED, UNPUBLISHED
@@ -220,7 +221,11 @@ export async function saveSyncLogToFirestore(log: {
   itemsFound: number;
   itemsNew: number;
   itemsUpdated: number;
-  errorMessage?: string;
+  itemsFailed?: number;
+  triggerSource?: string;
+  startedAt?: string;
+  completedAt?: string;
+  errorMessage?: string | null;
 }): Promise<boolean> {
   if (!db || !isFirebaseConfigured()) return false;
 
@@ -229,12 +234,40 @@ export async function saveSyncLogToFirestore(log: {
     const docRef = doc(logsRef);
     await setDoc(docRef, {
       ...log,
+      itemsFailed: log.itemsFailed ?? 0,
+      errorMessage: log.errorMessage ?? null,
       timestamp: Timestamp.now(),
     });
     return true;
   } catch (error) {
     console.error('Firestore saveSyncLogToFirestore 에러:', error);
     return false;
+  }
+}
+
+/**
+ * 7-1. 최근 수집 동기화 로그 1건 조회
+ */
+export async function getLatestSyncLogFromFirestore(): Promise<any | null> {
+  if (!db || !isFirebaseConfigured()) return null;
+
+  try {
+    const logsRef = collection(db, LOGS_COLLECTION);
+    const q = query(logsRef, orderBy('timestamp', 'desc'), limit(1));
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    const d = snap.docs[0];
+    const data = d.data();
+    const tsIso = data.timestamp?.toDate ? data.timestamp.toDate().toISOString() : null;
+    return {
+      id: d.id,
+      ...data,
+      startedAt: data.startedAt || tsIso,
+      completedAt: data.completedAt || tsIso,
+    };
+  } catch (error) {
+    console.error('Firestore getLatestSyncLogFromFirestore 에러:', error);
+    return null;
   }
 }
 
